@@ -156,7 +156,7 @@ dsh --profile web --dump-config        # 应同时出现 better-sidebar 和 plan
 dsh: disabling profile plugin "plan-tasks": Plugin ... is incompatible ...
 ```
 
-网页上看就是「装了没反应」。范围是 `^0.2.1-rc.3`（允许 `0.2.x`，`0.3.0` 起视为不兼容）。对一下 `dsh --version`，再把启动终端里的 stderr 翻出来。
+网页上看就是「装了没反应」。范围是 `^0.2.1-rc.3 || >=0.3.0-0`（覆盖 `0.2.1-rc.3` 起的所有版本，含 0.3 的预发布）。对一下 `dsh --version`，再把启动终端里的 stderr 翻出来。
 
 **3）宿主半边没加载**
 
@@ -186,10 +186,23 @@ curl -X POST http://127.0.0.1:8848/plan-tasks/api/read \
 ## 兼容性
 
 ```json
-"engines": { "node": ">=20", "dsh": "^0.2.1-rc.3" }
+"engines": { "node": ">=20", "dsh": "^0.2.1-rc.3 || >=0.3.0-0" }
 ```
 
 `engines.dsh` 由兼容性门禁校验；版本落在范围外时插件被跳过并打一条 warning，不会让整个 harness 起不来。
+
+范围里显式保留了 `>=0.3.0-0` 分支：本插件的对外接口面很窄（宿主侧只用 `node:fs`/`node:path` 和 webserver 路由注册，客户端只经 `ctx.slots` 与 `betterSidebar` 注册页签），没有理由假定 0.3 会破坏它。若不给这个分支，harness 一升到 0.3，所有用户都会遇到「装了没反应」式的静默禁用。
+
+写成 `0.3.0-0` 而不是 `0.3.0` 是因为 node-semver 的规则：只有当范围内*某个*比较符与被测版本的 `major.minor.patch` 元组完全一致、且自身带预发布标签时，预发布版本才会被放行。写成 `>=0.3.0` 会连 `0.3.0-rc.1` 一起挡掉，用户得手工绕过 `ERESOLVE`。
+
+实测该范围的判定（`semver.satisfies`）：
+
+| 版本 | 结果 | | 版本 | 结果 |
+| --- | --- | --- | --- | --- |
+| `0.2.1-rc.2` | ❌ | | `0.3.0-rc.1` | ✅ |
+| `0.2.1-rc.3` | ✅ | | `0.3.0` | ✅ |
+| `0.2.1-rc.4` | ✅ | | `0.4.2` | ✅ |
+| `0.2.5` | ✅ | | `1.0.0` | ✅ |
 
 ## 目录结构
 
@@ -197,10 +210,13 @@ curl -X POST http://127.0.0.1:8848/plan-tasks/api/read \
 dsh-plan-tasks/
 ├── package.json            # dsh.bundle.patch + dsh.client 声明
 ├── cordis.patch.yml        # 往 profile 里插一行 plan-tasks
-├── icon.svg                # 页签图标
+├── icon.svg                # 页签图标（矢量，用于 UI）
+├── assets/
+│   └── icon-180.png        # 市场卡片位图（插件市场只收 GitHub 托管的 png/jpg/webp）
 ├── lib/
 │   ├── index.js            # 宿主半边：读写 plan.json、初始化、注册 /plan-tasks/api/*
 │   └── client.js           # 客户端：侧边栏页签 UI、状态机、动画、样式
+├── LICENSE
 └── README.md
 ```
 
