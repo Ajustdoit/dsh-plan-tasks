@@ -25,11 +25,11 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "lib/index.js",
-    "lib/client.js",
+    "lib/",
+    "src/",
+    "scripts/",
     "cordis.patch.yml",
     "icon.svg",
-    "assets/",
     "README.md"
   ],
   "dsh": {
@@ -47,5 +47,10 @@
   "engines": {
     "node": ">=20",
     "dsh": "^0.2.1-rc.3 || >=0.3.0-0"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node scripts/check-imports.mjs && node scripts/unused-imports.mjs && node scripts/unused-decls.mjs && node scripts/unused-decls.mjs --host && node scripts/dead-css.mjs && node build.mjs --check && node --check lib/client.js",
+    "prepack": "node build.mjs"
   }
 }

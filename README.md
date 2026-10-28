@@ -68,12 +68,15 @@ npm pack          # 生成 dsh-plan-tasks-1.0.0.tgz
 ## 快速开始
 
 1. 重启后打开 DSH 右侧栏，点「任务列表」页签。
-2. 第一次打开会提示**初始化**，它会往项目根写入：
+2. 第一次打开会提示**初始化**，它只往项目根写一个文件：
    ```
-   .plan/plan.json                     计划队列
-   .dsh/skills/plan-tasks/SKILL.md     执行技能
+   .plan/plan.json      计划队列
    ```
-   技能正文编译在宿主 `lib/index.js` 的 `skillMarkdown(cwd)` 里，所以 **tgz 包里没有 `.dsh/` 是正常的** —— 技能是在目标项目里运行时生成的；没点过初始化，项目里就没有这个技能。
+   执行技能 `plan-tasks` 是插件通过平台技能系统（`ctx.skills.register`，runtime 层）注册的**虚拟技能**，
+   正文编译在宿主 `lib/host/skill.js` 的 `skillMarkdown(cwd)` 里：**不落到项目目录、不需要任何「同步技能」操作、
+   装了插件就等于装好了技能**。项目里若还留着旧版本写下的 `.dsh/skills/plan-tasks/SKILL.md`，
+   插件在读取计划时会自动清掉（只删 frontmatter 里 `name: plan-tasks` 的那份，别人的技能一个字节都不动）——
+   否则项目层（rank 100）会压住 runtime 层（rank 250）的虚拟技能。
 3. 在底部输入框写下计划，选任务类型，回车提交。
 4. 想让它开工时说「开始干活」，或在侧边栏里点行内按钮触发。
 
@@ -115,6 +118,8 @@ npm pack          # 生成 dsh-plan-tasks-1.0.0.tgz
 | `time` | 耗时（毫秒） |
 | `note` | 执行结果回填 |
 | `createdAt` / `startedAt` | ISO 时间戳 |
+| `decomposeKey` | 拆解模式的幂等键：同一次拆解产生的多条共用一个键 |
+| `sourcePrompt` | 拆解产物记下的原始提示词全文；手工提交的条目为空串 |
 
 ### 三种任务类型
 
@@ -126,7 +131,7 @@ npm pack          # 生成 dsh-plan-tasks-1.0.0.tgz
 
 ## plan-tasks 技能
 
-初始化后 `.dsh/skills/plan-tasks/SKILL.md` 会被写入项目，触发词是「开始干活」「继续干活」「执行计划」「下一条计划」。
+技能是插件内置的虚拟技能（runtime 层，不落盘），触发词是「开始干活」「继续干活」「执行计划」「下一条计划」。
 
 它的执行纪律刻意写得很死，因为踩过坑：
 
@@ -188,7 +193,7 @@ curl -X POST http://127.0.0.1:8848/plan-tasks/api/read \
 
 ### 更新了插件但界面没变
 
-先 `Ctrl+F5` 硬刷新；改动涉及宿主 `lib/index.js` 时必须重启 `dsh web`（client bundle 会热更，host 路由不会）。
+先 `Ctrl+F5` 硬刷新；改动涉及宿主（`lib/index.js` 或 `lib/host/` 下任一模块）时必须重启 `dsh web`（client bundle 会热更，host 路由不会）。面板右上角的「重启」按钮会先回包再拉起启动器，重启完页面自动刷新。
 
 ### 换机器 / 发给同事
 
@@ -222,14 +227,57 @@ dsh-plan-tasks/
 ├── package.json            # dsh.bundle.patch + dsh.client 声明
 ├── cordis.patch.yml        # 往 profile 里插一行 plan-tasks
 ├── icon.svg                # 页签图标（矢量，用于 UI）
+├── build.mjs               # 客户端拼接脚本（node build.mjs）
 ├── assets/
 │   └── icon-180.png        # 市场卡片位图（插件市场只收 GitHub 托管的 png/jpg/webp）
+├── scripts/                # 零依赖自检脚本（都被 npm test 串起来）
+│   ├── check-imports.mjs   #   宿主模块依赖图：无环、无缺后缀、无裸模块
+│   ├── unused-imports.mjs  #   import 进来却没用的名字
+│   ├── unused-decls.mjs    #   声明了却没人引用的顶层函数/常量
+│   ├── dead-css.mjs        #   样式里定义了、JS 从没挂上去的 .plt-* 类
+│   └── dead-code.mjs       #   客户端未调用函数 + 宿主未被 import 的导出
 ├── lib/
-│   ├── index.js            # 宿主半边：读写 plan.json、初始化、注册 /plan-tasks/api/*
-│   └── client.js           # 客户端：侧边栏页签 UI、状态机、动画、样式
+│   ├── index.js            # 宿主入口：只做装配（35 行）
+│   ├── host/               # 宿主各模块
+│   │   ├── constants.js    #   目录名、字段白名单、拆解数量上下限
+│   │   ├── paths.js        #   项目根定位、.plan 路径、越界判断
+│   │   ├── values.js       #   脏数据容错取值：str / pick / isRunning
+│   │   ├── item.js         #   条目组装
+│   │   ├── store.js        #   条目规范化、短名生成、lite 投影、plan.json 读写
+│   │   ├── skill.js        #   虚拟技能注册 + 旧版技能副本清理
+│   │   ├── snapshot.js     #   项目快照（目录树 / README / 提交 / 历史标题）
+│   │   ├── decompose.js    #   拆解模式：prompt、解析、臆造路径检查
+│   │   ├── restart.js      #   重启：先回包再拉起启动器
+│   │   ├── api.js          #   /plan-tasks/api/* 各方法的实现
+│   │   ├── router.js       #   请求分发、鉴权头校验、错误包装
+│   │   └── http.js         #   JSON 请求体读取与响应写出
+│   └── client.js           # 客户端产物（由 build.mjs 生成，勿手改）
+├── src/client/             # 客户端源码：同一函数作用域的片段，按文件名拼接
+│   ├── 00-loader-head.js   #   模块头、常量、图标底色
+│   ├── 10-icons.js         #   内联 SVG 图标组件
+│   ├── 15-css-decl.js      #   CSS_PARTS 声明
+│   ├── 20-css/             #   样式分组（组内按文件名字典序，即层叠顺序）
+│   │   ├── 10-topbar.js    #     顶栏与通用按钮
+│   │   ├── 11-overlay.js   #     遮罩与行内提示
+│   │   ├── 12-composer.js  #     输入区骨架
+│   │   ├── 13-item.js      #     条目卡片
+│   │   ├── 14-groups.js    #     分组配色与组头
+│   │   ├── 15-detail.js    #     详情区
+│   │   ├── 16-bulk.js      #     批量操作条
+│   │   ├── 17-input.js     #     输入框
+│   │   ├── 18-chips.js     #     模式胶囊与底栏
+│   │   └── 30-light.js     #     浅色主题覆盖（必须最后）
+│   ├── 25-css-join.js      #   CSS 文本拼合
+│   ├── 30-runtime.js       #   API 调用、浏览器侧发提示词、复制
+│   ├── 50-item.js          #   Item 卡片组件
+│   ├── 60-tab.js           #   PlanTasksTab：状态、分组、手风琴
+│   └── 70-apply.js         #   apply：注入样式、注册页签
 ├── LICENSE
 └── README.md
 ```
+
+改客户端逻辑或样式：改 `src/client/` 下的片段，然后 `node build.mjs`（或 `npm run build`）。
+`npm test` 会校验 `lib/client.js` 与 `src/client/` 是否同步，避免提交半成品。
 
 ## 致谢
 
