@@ -1,6 +1,6 @@
 {
   "name": "@chengfa/dsh-plan-tasks",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "DSH 侧边栏「任务列表」插件：读写项目根目录 .plan/plan.json，手风琴展示计划进度，并配合 .dsh/skills 技能按计划执行。",
   "license": "MIT",
   "keywords": [
