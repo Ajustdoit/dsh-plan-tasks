@@ -12,7 +12,14 @@
    和 14px 文字排在一起时矮半像素；这层 line-height:0 的 flex 盒子把它钉在文字中线上。 */
 .plt-chip-ico{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;line-height:0}
 .plt-chip-txt{display:inline-flex;align-items:center;line-height:1}
-.plt-send{flex:0 0 auto;width:32px;height:32px;border-radius:50%;border:none;padding:0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;background:var(--dsw-alias-bg-accent,#2f6fd0);color:#fff;box-shadow:0 2px 6px -2px rgba(47,111,208,.55),inset 0 1px 0 rgba(255,255,255,.22);transition:transform .1s ease,opacity .12s ease,background .12s ease,box-shadow .14s ease}
+/* 发送钮加宽（id=174）：32 → 38px（+18.75%，落在需求给的 10%~20% 区间），只动水平方向。
+   圆角必须跟着从 50% 换成定值 16px：50% 按各自轴算，38x32 得到 rx=19/ry=16 的压扁椭圆，
+   端部不是半圆；16px = 高度的一半，两轴都不触发 CSS 半径收缩，是精确的「两端半圆 + 直边」胶囊。
+   （实测比对 .shot/174-inset.mjs；999px 与 16px 在这台 Chrome 上逐行一致 —— 999 会被收缩规则
+   clamp 回 16，但 16px 不依赖那条规则，且面板压矮的窄档把尺寸改成 26x26 时，
+   16+16>26 自动 clamp 成 13 = 边长一半，回到正圆，一个值两种尺寸都对。）
+   高度、字号、颜色、内边距、垂直居中（align/justify:center）全部保持不变。 */
+.plt-send{flex:0 0 auto;width:38px;height:32px;border-radius:16px;border:none;padding:0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;background:var(--dsw-alias-bg-accent,#2f6fd0);color:#fff;box-shadow:0 2px 6px -2px rgba(47,111,208,.55),inset 0 1px 0 rgba(255,255,255,.22);transition:transform .1s ease,opacity .12s ease,background .12s ease,box-shadow .14s ease}
 .plt-send:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 10px -3px rgba(47,111,208,.62),inset 0 1px 0 rgba(255,255,255,.26)}
 .plt-send:active:not(:disabled){transform:translateY(0) scale(.96)}
 .plt-send:disabled{opacity:.38;cursor:default}

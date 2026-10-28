@@ -662,7 +662,9 @@
           if (!silent) {
             setNotice(
               reviewed
-                ? `已审核通过 #${id}`
+                ? `已审核通过 #${id}${
+                    Number(data?.trimmedCount) > 0 ? ` · 超上限，已清理最旧 ${data.trimmedCount} 条` : ''
+                  }`
                 : value.review === false
                   ? `已取消审核 #${id}`
                   : typeof value.plan === 'string'
@@ -670,6 +672,10 @@
                     : `已更新 #${id}`,
             )
           }
+          // 宿主这次顺带裁掉了旧条目：乐观合并只更新了改动的这一条，
+          // 被删的那些还留在本地 state 里，会一直显示到下一次轮询（最多 5 秒）。
+          // 立刻 sync 一次，别让已经不存在的东西摆在面板上。
+          if (Number(data?.trimmedCount) > 0) await sync()
           return data
         } catch (error) {
           setState((prev) => ({ ...prev, error: error instanceof Error ? error.message : String(error) }))
@@ -791,6 +797,29 @@
         } finally {
           setBusy(false)
         }
+      }
+
+      /**
+       * 「已审核」上限下拉的 change（id=188）。
+       *
+       * 值只有一个来源——宿主读回的 `data.settings.reviewedLimit`，所以这里不存本地副本：
+       * 下拉显示的就是磁盘上的真值，不会出现「界面选了 100、文件里还是 0」的错位。
+       *
+       * 裁剪本身放在宿主写设置时做（见 #189），不在客户端算：两边各算一遍 FIFO，
+       * 一旦排序方向理解不同就会删错条目。这里只负责「写回 + 重读 + 提示」。
+       */
+      const changeReviewedLimit = async (value) => {
+        const next = Number(value)
+        await run(async () => {
+          const saved = await call('settings', { ...payload, patch: { reviewedLimit: next } })
+          const cut = Number(saved?.trimmedCount) || 0
+          setNotice(
+            cut > 0
+              ? `已审核上限 ${next === 0 ? '无限' : next} · 清理最旧 ${cut} 条`
+              : `已审核上限：${next === 0 ? '无限' : next}`,
+          )
+          return call('read', { ...payload, lite: true })
+        })
       }
 
       React.useEffect(() => {
@@ -982,6 +1011,25 @@
                               h('span', { className: 'plt-caret' }, h(CaretIcon, { size: 13 })),
                               h('span', { className: 'plt-group-name' }, group.title),
                               h('span', { className: 'plt-group-count' }, String(group.list.length)),
+                              // 「已审核」上限下拉（id=188）。档位列表由宿主 constants.js 下发，
+                              // 这里不抄第二份数组；宿主版本太旧、没有这个字段时整块不渲染，
+                              // 避免出现一个点下去只会报错的死控件。
+                              group.key === 'reviewed' && Array.isArray(state.data?.reviewedLimits)
+                                ? h(
+                                    'select',
+                                    {
+                                      className: 'plt-limit',
+                                      value: String(state.data?.settings?.reviewedLimit ?? 0),
+                                      disabled: busy,
+                                      title: '已审核最多保留多少条；超出按先进先出删掉最旧的，选「无限」不删',
+                                      onClick: (e) => e.stopPropagation(),
+                                      onChange: (e) => void changeReviewedLimit(e.target.value),
+                                    },
+                                    state.data.reviewedLimits.map((n) =>
+                                      h('option', { key: String(n), value: String(n) }, n === 0 ? '无限' : String(n)),
+                                    ),
+                                  )
+                                : null,
                             ),
                             isOpen
                               ? group.list.length > 0

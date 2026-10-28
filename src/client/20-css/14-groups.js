@@ -48,13 +48,17 @@
 .plt-group-body .plt-sec{margin-top:13px}
 .plt-group-body .plt-sec-h{font-size:13px;letter-spacing:.05em;color:rgba(var(--plt-accent),.9);font-weight:600;margin-bottom:7px;text-transform:none}
 /* 「计划」标题右侧的复制按钮组：平时低调，hover 才亮起来。 */
-.plt-copy{margin-left:auto;display:inline-flex;align-items:center;gap:8px;flex:0 0 auto}
+.plt-copy{margin-left:auto;display:inline-flex;align-items:center;gap:6px 8px;flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end}
 /* 「计划」标题右侧的小胶囊：字号 11→12、内边距 1px 6px→3px 9px、图标与文字间距 3→5px，
    三个按钮之间 5→8px。原来的尺寸贴着标题基线，点起来也太窄。 */
 .plt-copy-btn{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;border:1px solid rgba(var(--plt-accent),.28);background:transparent;color:rgba(var(--plt-accent),.85);font-size:12px;line-height:16px;font-weight:500;letter-spacing:0;cursor:pointer;white-space:nowrap;transition:background .15s ease,border-color .15s ease,color .15s ease}
 .plt-copy-btn:hover{background:rgba(var(--plt-accent),.14);border-color:rgba(var(--plt-accent),.55);color:#fff}
 .plt-copy-btn:active{transform:translateY(.5px)}
 .plt-copy-btn.done{background:rgba(76,175,80,.18);border-color:rgba(76,175,80,.55);color:#bfe6c1}
+/* 禁用态：原来只有底部审批按钮的 disabled 规则管着，搬进标题行后必须补上，
+ * 否则待审核条目在 busy（正在提交）时这个「通过」还看着能点。 */
+.plt-copy-btn:disabled{opacity:.45;cursor:default}
+.plt-copy-btn:disabled:hover{background:transparent;border-color:rgba(var(--plt-accent),.28);color:rgba(var(--plt-accent),.85)}
 .plt-group-body .plt-plan{background:rgba(var(--plt-accent),.05);border:1px solid rgba(var(--plt-accent),.1);border-radius:6px;padding:10px 12px;max-height:260px}
 .plt-group-body .plt-note{background:rgba(var(--plt-accent),.035);border-left:2px solid rgba(var(--plt-accent),.45);border-radius:0 6px 6px 0;padding:9px 11px;max-height:220px}
 .plt-group-body .plt-meta{color:var(--dsw-alias-label-caption,#9a9a9a);gap:5px 12px;margin-top:12px}

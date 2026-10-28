@@ -58,6 +58,24 @@
 .plt-group-h.open .plt-caret{transform:rotate(90deg)}
 .plt-group-name{flex:1 1 auto;font-size:14.5px;font-weight:600;color:var(--dsw-alias-label-secondary,#c8c8c8);letter-spacing:.02em}
 .plt-group-count{flex:0 0 auto;font-size:12.5px;line-height:18px;padding:0 7px;border-radius:999px;background:var(--dsw-alias-bg-hover,rgba(255,255,255,.08));color:var(--dsw-alias-label-caption,#9a9a9a)}
+/* 「已审核」上限下拉（id=188/190）：只出现在已审核组头右侧。
+   appearance:none + data-uri 箭头 —— 原生 select 的箭头在暗色面板里是一个亮块，
+   颜色由系统画、CSS 管不着，只能自绘。
+   底色取组自身的 --plt-accent（已审核组是灰蓝），和组头、计数胶囊同一色系，
+   不引入新颜色变量。字号刻意比 .plt-group-count 小 0.5px：胶囊是「读数」、
+   下拉是「控件」，控件略小一级，两者并排时不会互相抢；
+   高度用 26px 而非字号推导，保证与组头 38px 的上下留白对称。 */
+.plt-limit{flex:0 0 auto;max-width:104px;height:26px;box-sizing:border-box;appearance:none;-webkit-appearance:none;-moz-appearance:none;margin:0;padding:0 22px 0 8px;border-radius:8px;border:1px solid rgba(var(--plt-accent),.28);background:rgba(var(--plt-accent),.1) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%239a9a9a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 6px center/10px 10px;color:var(--dsw-alias-label-secondary,#c8c8c8);font:inherit;font-size:12px;line-height:1;font-weight:500;letter-spacing:.02em;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.plt-limit:hover:not(:disabled){border-color:rgba(var(--plt-accent),.46);background-color:rgba(var(--plt-accent),.17)}
+.plt-limit:focus-visible{outline:2px solid rgba(var(--plt-accent),.5);outline-offset:1px}
+.plt-limit:disabled{opacity:.5;cursor:default}
+/* 弹出列表由系统绘制，明暗各给一档底色，避免暗面板里浮出一张白单子。 */
+.plt-limit option{background:#1c1f24;color:#e8e8e8}
+/* 侧栏窄到 320px 以下时先让下拉瘦身，标题再收缩，两侧都不换行、不溢出。
+   必须用 @container 不是 @media：@media 量的是视口，侧栏可以拖到 300px 而窗口仍是 1900px，
+   那条规则永远不会触发。.plt-root 有 container-type:size（id=152），
+   这里和 17-input.js 的档位胶囊一样按容器宽度走。 */
+@container (max-width:320px){.plt-limit{max-width:84px;padding-right:20px}.plt-group-h{gap:6px}}
 /* 组内自成滚动区：组头留在外面所以始终可见，条目在这一块里内滚动。
    左右各留 9px，条目不再顶着组的边框。 */
 .plt-group-body{display:flex;flex-direction:column;gap:6px;padding:8px 9px 9px;overflow:auto;flex:1 1 auto;min-height:0;scrollbar-width:thin;scrollbar-color:rgba(var(--plt-accent),.45) transparent}

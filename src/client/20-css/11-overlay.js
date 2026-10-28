@@ -7,16 +7,18 @@
    pointer-events:none 是刻意的 —— 遮罩只做视觉提示，不接管点击，
    底下（以及侧边栏其它）按钮仍然可以正常点，不会出现「点不动了」。 */
 .plt-split-mask{position:absolute;inset:0;z-index:18;background:rgba(6,14,26,.42);pointer-events:none;animation:plt-split-fade .16s ease both}
-/* 卡片层级永远高于遮罩（它是遮罩的子节点，天然在上），贴右边缘、圆角只留左边两个。 */
+/* 卡片层级永远高于遮罩（它是遮罩的子节点，天然在上）。
+   id=171：从「贴右边缘探出来」改成面板正中 —— left:50% + translate(-50%,-50%)，
+   圆角/边框/阴影都恢复四边对称（贴边时代的 border-right:none、单侧投影都是为贴合用的）。 */
 .plt-split-card{
-  position:absolute;top:50%;right:0;transform:translateY(-50%);
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
   display:flex;align-items:center;gap:9px;
   max-width:min(80%,250px);
   padding:11px 15px;
-  border-radius:12px 0 0 12px;
-  border:1px solid rgba(255,255,255,.16);border-right:none;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.16);
   background:rgba(30,34,42,.96);
-  box-shadow:-12px 0 30px rgba(0,0,0,.38);
+  box-shadow:0 12px 30px rgba(0,0,0,.38);
   color:#f2f4f7;font-size:13.5px;line-height:1.5;
   pointer-events:auto;
   animation:plt-split-in .22s cubic-bezier(.22,.9,.28,1) both;
@@ -25,9 +27,11 @@
 .plt-split-card .plt-split-text strong{font-weight:600}
 .plt-split-card .plt-split-hint{color:rgba(232,238,247,.62);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @keyframes plt-split-fade{from{opacity:0}to{opacity:1}}
-/* 进场方向从左往右（往面板内部滑），不从右边缘外侧滑入 —— 后者会在动画期间
-   把卡片顶出面板、撑出横向滚动条。 */
-@keyframes plt-split-in{from{opacity:0;transform:translate(-14px,-50%)}to{opacity:1;transform:translate(0,-50%)}}
+/* 进场关键帧必须与基础样式的 transform 用同一套居中值：
+   animation 的 fill-mode 是 both，动画跑完后保留的是**关键帧里的 to**，不是基础样式 ——
+   若 to 还写着旧的 translate(0,-50%)，卡片会永久偏右半个身位（实测 dx=+56px）。
+   方向也换了：贴边时代是从左往右滑进面板；居中后改成从中心上方 14px 落位，不再横向漂移。 */
+@keyframes plt-split-in{from{opacity:0;transform:translate(-50%,calc(-50% - 14px))}to{opacity:1;transform:translate(-50%,-50%)}}
 @media (prefers-reduced-motion: reduce){
   .plt-split-mask{animation:none}
   .plt-split-card{animation:none}

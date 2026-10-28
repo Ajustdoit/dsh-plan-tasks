@@ -92,7 +92,7 @@
         (it) =>
           `${it.id}|${it.order}|${it.execute === true ? 1 : 0}|${it.review === true ? 1 : 0}|${it.draft === true ? 1 : 0}|${it.startedAt ?? ''}|${it.noteLen ?? ''}|${it.planLen ?? ''}|${it.time ?? 0}|${it.name ?? ''}`,
       )
-      return `${data.planExists === true ? 1 : 0}|${data.broken === true ? 1 : 0}|${parts.join(';')}`
+      return `${data.planExists === true ? 1 : 0}|${data.broken === true ? 1 : 0}|s${data.settings?.reviewedLimit ?? ''}|${parts.join(';')}`
     }
 
     function fmtTime(ms) {
@@ -106,6 +106,25 @@
       if (m < 60) return rs === 0 ? `${m} 分` : `${m} 分 ${rs} 秒`
       const hh = Math.floor(m / 60)
       return `${hh} 时 ${m % 60} 分`
+    }
+
+    /* id=177：标题行的紧凑耗时文本。输入与 fmtTime 一样是**毫秒**——拆解批次里写的
+       「秒数」是口径笔误：store 落盘的 time 就是毫秒（Date.now() - startedAt），
+       按秒处理会放大 1000 倍。措辞用「X分钟Y秒」，与详情的 fmtTime 分工：
+       详情给人细看，标题给人扫。缺失 / 0 / 非法一律返回空串，由调用方把整个节点
+       隐藏（0 在 store 语义里就是「还没测出耗时」：默认值和 clearTime 都归 0）。
+       正数但不足 1 秒显示「1秒」，免得给真跑过的任务挂个「0秒」。 */
+    function fmtDur(ms) {
+      const n = Number(ms)
+      if (!Number.isFinite(n) || n <= 0) return ''
+      const s = Math.max(1, Math.round(n / 1000))
+      if (s < 60) return `${s}秒`
+      const m = Math.floor(s / 60)
+      const rs = s % 60
+      if (m < 60) return rs === 0 ? `${m}分钟` : `${m}分钟${rs}秒`
+      const hh = Math.floor(m / 60)
+      const rm = m % 60
+      return rm === 0 ? `${hh}小时` : `${hh}小时${rm}分钟`
     }
 
     function fmtDate(iso) {

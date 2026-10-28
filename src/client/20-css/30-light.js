@@ -140,10 +140,8 @@ body:not([data-ds-dark-theme]) .plt-group-body .plt-note{background:rgba(var(--p
 body:not([data-ds-dark-theme]) .plt-note{border-left-color:var(--dsw-alias-border-accent,#2f6fd0)}
 body:not([data-ds-dark-theme]) .plt-source{color:#4a5261;background:rgba(96,106,122,.05);border-color:rgba(96,106,122,.26)}
 body:not([data-ds-dark-theme]) .plt-del{color:#c0392b;border-color:rgba(192,57,43,.32)}
-/* 「审核通过」在浅底下保持实心琥珀胶囊：盖掉 .plt-btn 的通用描边与 hover 底色。 */
-body:not([data-ds-dark-theme]) .plt-approve{border-color:rgba(var(--plt-accent),.78);color:#2a1e00;background:linear-gradient(180deg,rgba(var(--plt-accent),1),rgba(var(--plt-accent),.86));box-shadow:0 1px 2px rgba(0,0,0,.14),0 0 10px -5px rgba(var(--plt-accent),.7)}
-body:not([data-ds-dark-theme]) .plt-approve:hover:not(:disabled){background:linear-gradient(180deg,rgba(var(--plt-accent),1),rgba(var(--plt-accent),.94));box-shadow:0 1px 3px rgba(0,0,0,.18),0 0 16px -4px rgba(var(--plt-accent),.8)}
-body:not([data-ds-dark-theme]) .plt-approve.is-done{opacity:1;color:rgba(var(--plt-accent),1);background:rgba(var(--plt-accent),.12);border-color:rgba(var(--plt-accent),.45);box-shadow:none}
+/* 「审核通过」的浅色特化随 id=193 一起消失：现在它就是 .plt-copy-btn，
+ * 已有 body:not([data-ds-dark-theme]) .plt-copy-btn:hover / .done 两条覆盖接管，不需要额外的。 */
 body:not([data-ds-dark-theme]) .plt-err{background:rgba(192,57,43,.08);border-color:rgba(192,57,43,.3);color:#a93226}
 body:not([data-ds-dark-theme]) .plt-input{background:var(--dsw-alias-bg-primary,#fff);color:var(--dsw-alias-label-primary,#141a22);border-color:rgba(20,40,70,.16)}
 /* 草稿编辑框在浅底下：白底 + 绿色描边，聚焦时描边加深并带一圈淡绿光。 */
@@ -159,9 +157,22 @@ body:not([data-ds-dark-theme]) .plt-mask{background:rgba(20,32,56,.28)}
 /* —— 浅色下的次要文字：caption 在浅底上只有 2:1 出头，12.5px 会糊成一片 ——
    统一压到 bluish-700 一档（#61666b 附近），小字才有可读的对比度。 */
 body:not([data-ds-dark-theme]) .plt-id{color:#5f6672;opacity:1}
+/* id=179 浅色：label-caption 在白底上太淡（#adb2b8），跟 .plt-id 一样压深一档。 */
+body:not([data-ds-dark-theme]) .plt-dur{color:#5f6672;opacity:1}
 body:not([data-ds-dark-theme]) .plt-sec-h{color:#59606c}
+/* 深色那条 hover 规则（.plt-sec-toggle:hover .plt-sec-h，特异度 (0,3,0)）比上面这行高，
+   不补一条就会在白底上把标题刷成近白色（var 兜底 #e8e8e8）。 */
+body:not([data-ds-dark-theme]) .plt-sec-toggle:hover .plt-sec-h{color:#2b3240}
+body:not([data-ds-dark-theme]) .plt-sec-toggle .plt-sec-caret{color:#7a828e}
 body:not([data-ds-dark-theme]) .plt-meta{color:#59606c}
 body:not([data-ds-dark-theme]) .plt-group-count{color:#59606c}
+/* 上限下拉（id=190）：浅色下白底，深色那条 #1c1f24 的 option 底色要翻回来；
+   箭头的 data-uri 是写死的中灰，浅色下偏淡，换一版深灰的图。
+   底色仍走组自身的 --plt-accent（浅色档已审核是 96,106,122），只把透明度提一档，
+   免得在白底上几乎看不见这个控件。 */
+body:not([data-ds-dark-theme]) .plt-limit{border-color:rgba(96,106,122,.34);background-color:rgba(96,106,122,.1);background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%2359606c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");color:#3c434e}
+body:not([data-ds-dark-theme]) .plt-limit:hover:not(:disabled){border-color:rgba(96,106,122,.5);background-color:rgba(96,106,122,.16)}
+body:not([data-ds-dark-theme]) .plt-limit option{background:#ffffff;color:#2b3240}
 body:not([data-ds-dark-theme]) .plt-foot{color:#6a7280;opacity:1}
 body:not([data-ds-dark-theme]) .plt-empty{color:#59606c}
 /* 空组提示：深色下靠 opacity:.8 压暗，浅色下会直接糊掉，改成实色 + 图标稍亮。 */
@@ -226,9 +237,9 @@ body:not([data-ds-dark-theme]) .plt-check.locked input[type='checkbox']:disabled
 /* 拆解遮罩的浅色形态：白底界面下用淡蓝雾 + 白卡片，避免整块发黑。 */
 body:not([data-ds-dark-theme]) .plt-split-mask{background:rgba(20,40,70,.22)}
 body:not([data-ds-dark-theme]) .plt-split-card{
-  border:1px solid rgba(24,44,74,.14);border-right:none;
+  border:1px solid rgba(24,44,74,.14);
   background:#ffffff;
-  box-shadow:-12px 0 30px rgba(16,32,64,.18);
+  box-shadow:0 12px 30px rgba(16,32,64,.18);
   color:#20293a;
 }
 body:not([data-ds-dark-theme]) .plt-split-card .plt-split-hint{color:#5b6675}

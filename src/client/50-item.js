@@ -2,6 +2,8 @@
       const { item, open, detail, onToggle, onPatch, onRemove, onFetchDetail, busy, dragging, dropTarget, onDragStart, onDragOver, onDrop, onDragEnd, dragEnabled, selectable, selected, onSelect, showExecute, showReview, groupKey, impliedRunning, canPin, onPinTop, onPromote, onDemote, canDemote, editable } = props
       const status = statusOf(item, impliedRunning === true)
       const time = fmtTime(item.time)
+      // id=178：标题行的紧凑耗时（毫秒走 fmtDur）。空串代表缺失/0/非法，整节点不渲染。
+      const durText = fmtDur(item.time)
       // 列表数据是 lite 的（正文截断、备注只留长度）；展开时用按需取回的全文覆盖。
       // 取不到就退回 lite 的截断正文，至少不会空白。
       const loaded = detail !== null && detail !== undefined && detail.id === item.id ? detail : null
@@ -20,6 +22,8 @@
       // 没有原始提示词的条目（手工提交的）直接不渲染按钮，而不是给一个点了没反应的空壳。
       const canCopyPrompt = groupKey !== 'draft' && (item.sourcePromptLen ?? 0) > 0
       const [copied, setCopied] = React.useState('')
+      // 「原始提示词」默认折叠：展开状态只活在这个卡片里，切走再回来重新收起。
+      const [sourceOpen, setSourceOpen] = React.useState(false)
       // 草稿就地编辑：editing = 是否展开编辑框，draftText = 编辑中的文本。
       // 编辑即保存：停止输入片刻就自动落盘，所以没有「保存」按钮；「取消」= 还原成进来时的原文。
       const [editing, setEditing] = React.useState(false)
@@ -176,6 +180,15 @@
           // 编号单独占一个窄标签，标题就能把剩下的宽度全用上。
           h('span', { className: 'plt-id' }, `#${item.id}`),
           h('span', { className: 'plt-name', title: `#${item.id} ${item.name}\n\n${planText}` }, item.name),
+          // id=178/179：待审核的每一项在标题右侧挂耗时，扫一眼就知道这条跑了多久，
+          // 不用展开。必须是 .plt-name 的**兄弟**节点——塞进标题里会跟着一起被
+          // ellipsis 截掉，还会污染 title 的全文悬浮。
+          // id=183：已审核组同样挂耗时。两边走的是**同一个** fmtDur、同一个 .plt-dur
+          // 节点、同一份样式，只是组白名单多一项——不复制第二份格式化实现，
+          // 这样「6分钟28秒」在两处永远长得一样。空串（缺失/0/非法）时整节点缺席。
+          (groupKey === 'unreviewed' || groupKey === 'reviewed') && durText !== ''
+            ? h('span', { className: 'plt-dur', title: `这条任务耗时 ${durText}` }, durText)
+            : null,
           // 类型只用图标表示（和输入栏的胶囊图标一致）：「修改」是默认类型，不显示。
           // 放在状态标签左侧，先看到「这是什么类型的活」，再看到「进行到哪一步」。
           item.taskType === '仅回答' || item.taskType === '目标'
@@ -288,6 +301,27 @@
                           h('span', null, copied === 'prompt' ? '已复制' : '提示词'),
                         )
                       : null,
+                    // 「通过」＝原来的底部「审核通过」，按 id=192 的定位搬到这一排、改名、
+                    // 换成与「提示词」完全相同的 .plt-copy-btn 黄底样式（不新增样式类）。
+                    // 触发逻辑一字未动：仍是 onPatch({ review: true })，走 60-tab.js:624 的
+                    // patch，自动展开下一条 / 清空后折叠分组那套行为原样保留。
+                    // 条件也照搬：只有待审核组（showReview）且这条不在执行中才给——
+                    // 执行中的条目还没有结果可审，已审核的则早已整排不再重复出现。
+                    showReview === false || running
+                      ? null
+                      : h(
+                          'button',
+                          {
+                            className: 'plt-copy-btn',
+                            disabled: busy || item.review === true,
+                            title: '人工审核这一条的执行结果：标记为已通过',
+                            onClick: (e) => {
+                              e.stopPropagation()
+                              onPatch({ review: true })
+                            },
+                          },
+                          h('span', null, '通过'),
+                        ),
                   ),
                 ),
                 editable === true && editing
@@ -358,12 +392,33 @@
                   : null,
               // 拆解产物才有的「原始提示词」：这条计划当初是根据哪段需求拆出来的。
               // 手工提交的条目 sourcePrompt 为空，整段不渲染，展开后不会多出一块空框。
+              // 默认折叠：原文可能很长（整段需求），默认铺开会把卡片撑得很长，
+              // 用户是来看「做完了没」的，不是来重读需求的 —— 想看得自己点开。
               (loaded !== null && typeof loaded.sourcePrompt === 'string' && loaded.sourcePrompt !== '')
                 ? h(
                     'div',
                     { className: 'plt-sec' },
-                    h('div', { className: 'plt-sec-h' }, '原始提示词'),
-                    h('div', { className: 'plt-source' }, loaded.sourcePrompt),
+                    h(
+                      'button',
+                      {
+                        className: `plt-sec-toggle${sourceOpen ? ' open' : ''}`,
+                        type: 'button',
+                        'aria-expanded': sourceOpen === true,
+                        title: sourceOpen ? '收起原始提示词' : `展开原始提示词（${item.sourcePromptLen ?? loaded.sourcePrompt.length} 字）`,
+                        onClick: (e) => {
+                          e.stopPropagation()
+                          setSourceOpen((v) => v !== true)
+                        },
+                      },
+                      h(
+                        'span',
+                        { className: 'plt-sec-h' },
+                        '原始提示词',
+                        h('span', { className: 'plt-sec-hint' }, `${item.sourcePromptLen ?? loaded.sourcePrompt.length} 字`),
+                      ),
+                      h('span', { className: 'plt-sec-caret' }, h(CaretIcon, { size: 12 })),
+                    ),
+                    sourceOpen ? h('div', { className: 'plt-source' }, loaded.sourcePrompt) : null,
                   )
                 : (loaded === null && (item.sourcePromptLen ?? 0) > 0)
                   ? h('div', { className: 'plt-sec' }, h('div', { className: 'plt-sec-h' }, '原始提示词'), h('div', { className: 'plt-source' }, '（原始提示词加载中…）'))
@@ -393,23 +448,8 @@
                       }),
                       h('span', null, '已执行'),
                     ),
-                // 正在执行的条目还没有结果可审，不显示「审核通过」，避免误点。
-                // 审核通过是一次性动作（不存在「取消审核」），所以用按钮而不是复选框。
-                showReview === false || running
-                  ? null
-                  : h(
-                      'button',
-                      {
-                        className: `plt-btn plt-approve${item.review === true ? ' is-done' : ''}`,
-                        disabled: busy || item.review === true,
-                        title: '人工审核这一条的执行结果',
-                        onClick: (e) => {
-                          e.stopPropagation()
-                          onPatch({ review: true })
-                        },
-                      },
-                      h('span', null, '审核通过'),
-                    ),
+                // 「审核通过」已按 id=193 搬到「计划」标题行的「提示词」之后（改名「通过」、
+                // 复用 .plt-copy-btn），这里不再重复放一个入口，免得一张卡上两个审核按钮。
                 // 「转为待执行 / 转为草稿 / 删除」统一收进右侧的 .plt-actions，
                 // 草稿组里「转为待执行」和「删除」因此挨在一起，不再被 margin-left:auto 拉开。
                 h(

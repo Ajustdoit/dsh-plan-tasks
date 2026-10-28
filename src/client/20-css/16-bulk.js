@@ -29,12 +29,8 @@
 /* 条目内的「转为待执行 / 转为草稿」：小一号的描边胶囊，别抢删除的视觉重量。 */
 .plt-promote,.plt-demote{border-radius:999px;border-color:rgba(var(--plt-accent),.55);color:rgba(var(--plt-accent),1)}
 .plt-promote:hover:not(:disabled),.plt-demote:hover:not(:disabled){background:rgba(var(--plt-accent),.14);border-color:rgba(var(--plt-accent),.8)}
-/* 条目内的「审核通过」：一次性动作，做成实心胶囊按钮（原来是个复选框，容易被误认为可反复勾选）。 */
-.plt-approve{display:inline-flex;align-items:center;justify-content:center;gap:5px;font-size:12.5px;font-weight:600;line-height:18px;white-space:nowrap;padding:4px 13px;border-radius:999px;border:1px solid rgba(var(--plt-accent),.7);color:#231a00;background:linear-gradient(180deg,rgba(var(--plt-accent),.98),rgba(var(--plt-accent),.82));box-shadow:0 1px 2px rgba(0,0,0,.2),0 0 12px -5px rgba(var(--plt-accent),.8)}
-.plt-approve:hover:not(:disabled){background:linear-gradient(180deg,rgba(var(--plt-accent),1),rgba(var(--plt-accent),.9));box-shadow:0 1px 3px rgba(0,0,0,.24),0 0 18px -4px rgba(var(--plt-accent),.9)}
-.plt-approve:active:not(:disabled){transform:translateY(1px)}
-.plt-approve:disabled{opacity:.45;cursor:default;box-shadow:none}
-.plt-approve.is-done{opacity:1;color:rgba(var(--plt-accent),1);background:rgba(var(--plt-accent),.14);border-color:rgba(var(--plt-accent),.5);box-shadow:none;cursor:default}
+/* 条目内的「审核通过」在 id=193 已搬进「计划」标题行、改用 .plt-copy-btn（与「提示词」同款），
+ * 这套实心琥珀胶囊样式与 30-light.js 里的浅色覆盖一并删除 —— 留着就是 dead-css 门禁要抓的死规则。 */
 /* 「开始干活」：待执行组底部的主动作按钮。用本组的粉调做强调，实心填充，比其他按钮更显眼。 */
 .plt-bulk-start{border-top-color:rgba(var(--plt-accent),.32);background:rgba(var(--plt-accent),.07)}
 .plt-bulk-go{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:5px;font-size:12.5px;font-weight:600;line-height:18px;white-space:nowrap;padding:4px 14px;border-radius:999px;border:1px solid rgba(var(--plt-accent),.62);color:#fff;background:linear-gradient(180deg,rgba(var(--plt-accent),.92),rgba(var(--plt-accent),.72));box-shadow:0 1px 2px rgba(0,0,0,.18),0 0 12px -4px rgba(var(--plt-accent),.7)}
