@@ -7,9 +7,13 @@
  *
  * betterSidebar 是可选依赖：绝不能放进 exports.inject，否则未安装它时
  * cordis fiber 会一直 pending（web boot 报 entry did not activate）。
+ *
+ * id 必须等于 package.json 的 name。浏览器按包名找工厂，短名对不上时
+ * 预加载登记一次、正式启动再拉同一份脚本，就会报 duplicate factory，
+ * 整页 web boot 起不来。
  */
 window.__ModuleLoader__.load({
-  id: 'dsh-plan-tasks',
+  id: '@chengfa/dsh-plan-tasks',
   factory(require) {
     const React = require('react')
     const h = React.createElement

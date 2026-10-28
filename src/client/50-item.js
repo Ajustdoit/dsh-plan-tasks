@@ -18,9 +18,26 @@
       // 待审核组要再喂给别的会话，已审核组要回看/复用历史计划。
       const canCopyPlan = true
       const canCopyId = true
+      // 原始提示词的长度与正文：宿主有两种投影，必须两边都认。
+      //   lite 列表（自动刷新 / 静默重读）→ 只给 sourcePromptLen，sourcePrompt 被抹成空串；
+      //   全量 read（首挂载、手点「刷新」）→ 直接给 sourcePrompt 全文，压根没有 sourcePromptLen。
+      // 早先这里只读 sourcePromptLen，于是首屏那一次渲染里「提示词」按钮整批消失、
+      // 「提示词 → 通过」的顺序第一次画出来就是错的（id=194 联合回归抓到）。
+      const sourceLen = Math.max(
+        Number(item.sourcePromptLen ?? 0) || 0,
+        typeof item.sourcePrompt === 'string' ? item.sourcePrompt.length : 0,
+        loaded === null ? 0 : Number(loaded.sourcePromptLen ?? 0) || 0,
+      )
+      // 手上就已经有全文的情形（全量 read / detail 已回）：省掉一次 detail 请求。
+      const sourceText =
+        loaded !== null && typeof loaded.sourcePrompt === 'string' && loaded.sourcePrompt !== ''
+          ? loaded.sourcePrompt
+          : typeof item.sourcePrompt === 'string'
+            ? item.sourcePrompt
+            : ''
       // 「复制提示词」只给待执行及之后的真实任务卡（草稿还没有出处，不给）；
       // 没有原始提示词的条目（手工提交的）直接不渲染按钮，而不是给一个点了没反应的空壳。
-      const canCopyPrompt = groupKey !== 'draft' && (item.sourcePromptLen ?? 0) > 0
+      const canCopyPrompt = groupKey !== 'draft' && sourceLen > 0
       const [copied, setCopied] = React.useState('')
       // 「原始提示词」默认折叠：展开状态只活在这个卡片里，切走再回来重新收起。
       const [sourceOpen, setSourceOpen] = React.useState(false)
@@ -111,8 +128,8 @@
           if (fetched !== null && fetched !== undefined && typeof fetched.plan === 'string') full = fetched.plan
         }
         // 原始提示词同理：lite 里只有长度，非要复制时补一次 detail 取全文。
-        let source = loaded !== null && typeof loaded.sourcePrompt === 'string' ? loaded.sourcePrompt : ''
-        if (source === '' && (item.sourcePromptLen ?? 0) > 0) {
+        let source = sourceText
+        if (source === '' && sourceLen > 0) {
           const fetched = typeof onFetchDetail === 'function' ? await onFetchDetail(item.id) : null
           if (fetched !== null && fetched !== undefined && typeof fetched.sourcePrompt === 'string') source = fetched.sourcePrompt
         }
@@ -394,7 +411,7 @@
               // 手工提交的条目 sourcePrompt 为空，整段不渲染，展开后不会多出一块空框。
               // 默认折叠：原文可能很长（整段需求），默认铺开会把卡片撑得很长，
               // 用户是来看「做完了没」的，不是来重读需求的 —— 想看得自己点开。
-              (loaded !== null && typeof loaded.sourcePrompt === 'string' && loaded.sourcePrompt !== '')
+              (sourceText !== '' || (loaded === null && sourceLen > 0))
                 ? h(
                     'div',
                     { className: 'plt-sec' },
@@ -404,7 +421,7 @@
                         className: `plt-sec-toggle${sourceOpen ? ' open' : ''}`,
                         type: 'button',
                         'aria-expanded': sourceOpen === true,
-                        title: sourceOpen ? '收起原始提示词' : `展开原始提示词（${item.sourcePromptLen ?? loaded.sourcePrompt.length} 字）`,
+                        title: sourceOpen ? '收起原始提示词' : `展开原始提示词（${sourceLen} 字）`,
                         onClick: (e) => {
                           e.stopPropagation()
                           setSourceOpen((v) => v !== true)
@@ -414,15 +431,13 @@
                         'span',
                         { className: 'plt-sec-h' },
                         '原始提示词',
-                        h('span', { className: 'plt-sec-hint' }, `${item.sourcePromptLen ?? loaded.sourcePrompt.length} 字`),
+                        h('span', { className: 'plt-sec-hint' }, `${sourceLen} 字`),
                       ),
                       h('span', { className: 'plt-sec-caret' }, h(CaretIcon, { size: 12 })),
                     ),
-                    sourceOpen ? h('div', { className: 'plt-source' }, loaded.sourcePrompt) : null,
+                    sourceOpen ? h('div', { className: 'plt-source' }, sourceText) : null,
                   )
-                : (loaded === null && (item.sourcePromptLen ?? 0) > 0)
-                  ? h('div', { className: 'plt-sec' }, h('div', { className: 'plt-sec-h' }, '原始提示词'), h('div', { className: 'plt-source' }, '（原始提示词加载中…）'))
-                  : null,
+                : null,
               h(
                 'div',
                 { className: 'plt-meta' },

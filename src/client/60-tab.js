@@ -332,10 +332,15 @@
 
       // 展开中的那条如果被别处改动（模型回写备注、自己被编辑），要重新取全文。
       // 判据是 lite 列表里它的长度/耗时指纹，指纹没变就不重复下载备注。
+      // 必须带上「原始提示词」的长度：全量 read 的投影里它没有 sourcePromptLen、只有
+      // sourcePrompt 全文，只算 planLen/noteLen 会让「首次由全量数据换 lite 数据」时
+      // stamp 不变 → detail 永远不发 → 展开区的原文一直停在「加载中…」（id=194 抓到）。
       const openStamp = (() => {
         if (openId === null) return ''
         const it = (state.data?.items ?? []).find((x) => x.id === openId)
-        return it === undefined ? '' : `${it.id}:${it.planLen ?? 0}:${it.noteLen ?? 0}:${it.time ?? 0}`
+        if (it === undefined) return ''
+        const srcLen = Number(it.sourcePromptLen ?? 0) || (typeof it.sourcePrompt === 'string' ? it.sourcePrompt.length : 0)
+        return `${it.id}:${it.planLen ?? 0}:${it.noteLen ?? 0}:${it.time ?? 0}:${srcLen}`
       })()
       React.useEffect(() => {
         if (openId === null) {
