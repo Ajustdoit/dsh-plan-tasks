@@ -336,9 +336,14 @@
       )
     }
 
-    /** 执行中用的转转圈图标：一段圆弧匀速旋转，比文字更直观。 */
+    /**
+     * 执行中用的转转圈图标：一段圆弧匀速旋转，比文字更直观。
+     * `spin: false` 时只画圆弧、不挂动画类 —— 给「刷新」按钮那种由外层状态类
+     * 决定何时开始转的场景用，避免图标自带动画和父容器的状态类抢着控制。
+     */
     function SpinnerIcon(props) {
       const size = typeof props?.size === 'number' && props.size > 0 ? props.size : 12
+      const spinning = props?.spin !== false
       return h(
         'svg',
         {
@@ -351,9 +356,57 @@
           strokeWidth: 2.6,
           strokeLinecap: 'round',
           'aria-hidden': 'true',
-          className: 'plt-spin',
+          className: spinning ? 'plt-spin' : undefined,
           style: { display: 'block', flex: '0 0 auto' },
         },
         h('path', { d: 'M12 3.2a8.8 8.8 0 1 1-8.8 8.8', opacity: 0.95 }),
+      )
+    }
+
+    /**
+     * 「开始」按钮的实心三角（id=207）：顶栏里与文字并排，沿用 SpinnerIcon 的约定 ——
+     * 尺寸默认 12、颜色走 currentColor、display:block 不参与基线对齐。
+     * 与其余图标唯一的差别是实心（fill）而不是线稿，14px 字号下这个形状更认得出。
+     */
+    function PlayIcon(props) {
+      const size = typeof props?.size === 'number' && props.size > 0 ? props.size : 12
+      return h(
+        'svg',
+        {
+          xmlns: 'http://www.w3.org/2000/svg',
+          viewBox: '0 0 24 24',
+          width: size,
+          height: size,
+          fill: 'currentColor',
+          stroke: 'none',
+          'aria-hidden': 'true',
+          style: { display: 'block', flex: '0 0 auto' },
+        },
+        h('path', { d: 'M8.5 4.8v14.4L20 12z' }),
+      )
+    }
+
+    /**
+     * 「暂停」按钮的两条竖线（id=207）：与 PlayIcon 配成一对，线稿风格与其余图标一致。
+     * strokeWidth 取 3.2 —— 12px 下两根细线用 2.6 会糊成一坨，这个值刚好能分辨出两条。
+     */
+    function PauseIcon(props) {
+      const size = typeof props?.size === 'number' && props.size > 0 ? props.size : 12
+      return h(
+        'svg',
+        {
+          xmlns: 'http://www.w3.org/2000/svg',
+          viewBox: '0 0 24 24',
+          width: size,
+          height: size,
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 3.2,
+          strokeLinecap: 'round',
+          'aria-hidden': 'true',
+          style: { display: 'block', flex: '0 0 auto' },
+        },
+        h('path', { d: 'M9 5v14' }),
+        h('path', { d: 'M15 5v14' }),
       )
     }

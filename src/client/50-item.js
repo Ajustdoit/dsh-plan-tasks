@@ -167,7 +167,7 @@
                 'span',
                 {
                   className: 'plt-grip',
-                  title: '按住拖拽可调整顺序（执行顺序也跟着变）',
+                  'data-tip': '按住拖拽可调整顺序（执行顺序也跟着变）',
                   draggable: true,
                   onClick: (e) => e.stopPropagation(),
                   onDragStart: (e) => {
@@ -188,7 +188,7 @@
                   type: 'checkbox',
                   checked: selected === true,
                   disabled: busy,
-                  title: selected === true ? '取消选择这一条' : '选中这一条，稍后批量处理',
+                  'data-tip': selected === true ? '取消选择这一条' : '选中这一条，稍后批量处理',
                   onChange: (e) => onSelect(e.target.checked),
                 }),
               )
@@ -196,24 +196,24 @@
           h('span', { className: 'plt-caret' }, h(CaretIcon, { size: 13 })),
           // 编号单独占一个窄标签，标题就能把剩下的宽度全用上。
           h('span', { className: 'plt-id' }, `#${item.id}`),
-          h('span', { className: 'plt-name', title: `#${item.id} ${item.name}\n\n${planText}` }, item.name),
+          h('span', { className: 'plt-name', 'data-tip': `#${item.id} ${item.name}\n\n${planText}` }, item.name),
           // id=178/179：待审核的每一项在标题右侧挂耗时，扫一眼就知道这条跑了多久，
           // 不用展开。必须是 .plt-name 的**兄弟**节点——塞进标题里会跟着一起被
-          // ellipsis 截掉，还会污染 title 的全文悬浮。
+          // ellipsis 截掉，还会污染悬浮提示的全文。
           // id=183：已审核组同样挂耗时。两边走的是**同一个** fmtDur、同一个 .plt-dur
           // 节点、同一份样式，只是组白名单多一项——不复制第二份格式化实现，
           // 这样「6分钟28秒」在两处永远长得一样。空串（缺失/0/非法）时整节点缺席。
           (groupKey === 'unreviewed' || groupKey === 'reviewed') && durText !== ''
-            ? h('span', { className: 'plt-dur', title: `这条任务耗时 ${durText}` }, durText)
+            ? h('span', { className: 'plt-dur', 'data-tip': `这条任务耗时 ${durText}` }, durText)
             : null,
           // 类型只用图标表示（和输入栏的胶囊图标一致）：「修改」是默认类型，不显示。
           // 放在状态标签左侧，先看到「这是什么类型的活」，再看到「进行到哪一步」。
           item.taskType === '仅回答' || item.taskType === '目标'
-            ? h('span', { className: `plt-tag type plt-type-${item.taskType}`, title: `任务类型：${item.taskType}` }, h(ModeIcon, { kind: item.taskType, size: 13 }))
+            ? h('span', { className: `plt-tag type plt-type-${item.taskType}`, 'data-tip': `任务类型：${item.taskType}` }, h(ModeIcon, { kind: item.taskType, size: 13 }))
             : null,
           h(
             'span',
-            { className: `plt-tag ${status.key}`, title: status.key === 'running' ? '任务正在执行中' : undefined },
+            { className: `plt-tag ${status.key}`, 'data-tip': status.key === 'running' ? '任务正在执行中' : undefined },
             status.key === 'running' ? h(SpinnerIcon, { size: 12 }) : null,
             h('span', null, status.label),
           ),
@@ -223,7 +223,7 @@
                 'button',
                 {
                   className: 'plt-pin',
-                  title: '置顶：排到待执行的第一位（执行中那条之后）',
+                  'data-tip': '置顶：排到待执行的第一位（执行中那条之后）',
                   onClick: (e) => {
                     e.stopPropagation()
                     onPinTop()
@@ -253,7 +253,7 @@
                           'button',
                           {
                             className: `plt-copy-btn${editing ? ' done' : ''}`,
-                            title: editing ? '收起编辑框' : '直接编辑这条草稿的内容',
+                            'data-tip': editing ? '收起编辑框' : '直接编辑这条草稿的内容',
                             onClick: (e) => {
                               e.stopPropagation()
                               if (editing) void stopEditing(false)
@@ -277,7 +277,7 @@
                           'button',
                           {
                             className: `plt-copy-btn${copied === 'id' ? ' done' : ''}`,
-                            title: `复制这条计划的 ID（${item.id}）`,
+                            'data-tip': `复制这条计划的 ID（${item.id}）`,
                             onClick: (e) => {
                               e.stopPropagation()
                               void doCopy('id')
@@ -292,7 +292,7 @@
                           'button',
                           {
                             className: `plt-copy-btn${copied === 'plan' ? ' done' : ''}`,
-                            title: '复制这条计划的完整内容',
+                            'data-tip': '复制这条计划的完整内容',
                             onClick: (e) => {
                               e.stopPropagation()
                               void doCopy('plan')
@@ -308,7 +308,7 @@
                           'button',
                           {
                             className: `plt-copy-btn${copied === 'prompt' ? ' done' : ''}`,
-                            title: `复制这条任务的原始提示词（${item.sourcePromptLen} 字）`,
+                            'data-tip': `复制这条任务的原始提示词（${item.sourcePromptLen} 字）`,
                             onClick: (e) => {
                               e.stopPropagation()
                               void doCopy('prompt')
@@ -331,7 +331,7 @@
                           {
                             className: 'plt-copy-btn',
                             disabled: busy || item.review === true,
-                            title: '人工审核这一条的执行结果：标记为已通过',
+                            'data-tip': '人工审核这一条的执行结果：标记为已通过',
                             onClick: (e) => {
                               e.stopPropagation()
                               onPatch({ review: true })
@@ -368,7 +368,7 @@
                                 type: 'button',
                                 className: `plt-chip plt-chip-sm${item.taskType === type ? ' active' : ''}`,
                                 disabled: busy,
-                                title: `任务类型：${type}`,
+                                'data-tip': `任务类型：${type}`,
                                 onClick: (e) => {
                                   e.stopPropagation()
                                   onPatch({ taskType: type })
@@ -390,7 +390,7 @@
                           {
                             className: 'plt-btn',
                             disabled: busy || saveState === 'saving',
-                            title: '放弃这次修改，还原成进入编辑时的内容',
+                            'data-tip': '放弃这次修改，还原成进入编辑时的内容',
                             onClick: (e) => {
                               e.stopPropagation()
                               void stopEditing(true)
@@ -421,7 +421,7 @@
                         className: `plt-sec-toggle${sourceOpen ? ' open' : ''}`,
                         type: 'button',
                         'aria-expanded': sourceOpen === true,
-                        title: sourceOpen ? '收起原始提示词' : `展开原始提示词（${sourceLen} 字）`,
+                        'data-tip': sourceOpen ? '收起原始提示词' : `展开原始提示词（${sourceLen} 字）`,
                         onClick: (e) => {
                           e.stopPropagation()
                           setSourceOpen((v) => v !== true)
@@ -454,7 +454,7 @@
                   ? null
                   : h(
                       'label',
-                      { className: 'plt-check locked', title: '「已执行」由模型在执行完成后自动回填，不能手动修改' },
+                      { className: 'plt-check locked', 'data-tip': '「已执行」由模型在执行完成后自动回填，不能手动修改' },
                       h('input', {
                         type: 'checkbox',
                         checked: item.execute === true,
@@ -477,7 +477,7 @@
                         {
                           className: 'plt-btn plt-promote',
                           disabled: busy,
-                          title: '转为待执行：退出草稿，排进执行队列',
+                          'data-tip': '转为待执行：退出草稿，排进执行队列',
                           onClick: (e) => {
                             e.stopPropagation()
                             onPromote()
@@ -493,7 +493,7 @@
                         {
                           className: 'plt-btn plt-demote',
                           disabled: busy,
-                          title: '转为草稿：退出执行队列，存进草稿组',
+                          'data-tip': '转为草稿：退出执行队列，存进草稿组',
                           onClick: (e) => {
                             e.stopPropagation()
                             onDemote()
@@ -510,7 +510,7 @@
                         {
                           className: 'plt-btn plt-del',
                           disabled: busy,
-                          title: '删除这条计划',
+                          'data-tip': '删除这条计划',
                           onClick: onRemove,
                         },
                         '删除',

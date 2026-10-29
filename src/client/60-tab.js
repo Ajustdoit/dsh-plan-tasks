@@ -23,6 +23,10 @@
       const saved = readDraft()
 
       const [state, setState] = React.useState({ loading: true, error: '', data: null })
+      // 统一悬浮提示（id=249）：气泡挂在面板根上做事件委托，这里只提供根节点。
+      // 250 会把各处原生 title 换成 data-tip，届时不用再动这一行。
+      const rootRef = React.useRef(null)
+      useTipLayer(rootRef)
       const [openId, setOpenId] = React.useState(saved?.openId ?? null)
       const [busy, setBusy] = React.useState(false)
       const [showInit, setShowInit] = React.useState(false)
@@ -40,7 +44,16 @@
         taskType: typeof saved?.taskType === 'string' ? saved.taskType : '修改',
         expanded: saved?.expanded === true,
       })
-      const [notice, setNotice] = React.useState('')
+      const [notice, setNoticeState] = React.useState('')
+      // 每条提示自己带一个停留时长（id=223）：默认 NOTICE_MS，个别调用处（拆分完成）
+      // 显式要更久。用 ref 存是因为时长不是渲染内容 —— 放进 state 会白白多触发一轮渲染，
+      // 而 effect 只需在文案变化时读一下当前值。每次调用都重置成默认值，
+      // 免得「长提示」之后接着来的短提示继承了上一条的时长。
+      const noticeMsRef = React.useRef(NOTICE_MS)
+      const setNotice = (text, ms) => {
+        noticeMsRef.current = typeof ms === 'number' && ms > 0 ? ms : NOTICE_MS
+        setNoticeState(text)
+      }
       const [dragId, setDragId] = React.useState(null)
       const [dropId, setDropId] = React.useState(null)
       // 「待审核」组里批量勾选的 id 集合。
@@ -80,6 +93,22 @@
       const [tick, setTick] = React.useState(AUTO_INTERVAL)
       // 「开始干活」按钮的发送中状态（防连点）。
       const [starting, setStarting] = React.useState(false)
+      // 暂停请求在飞（id=208）：挡住重复点击，也让按钮在请求期间进忙碌态。
+      const [pausing, setPausing] = React.useState(false)
+      // state 是快照：同一次渲染里连点两下，两份闭包都读到 pausing === false，
+      // 于是会发两个 cancel。用 ref 做同步闸门，等重渲染救场已经太晚。
+      const startingRef = React.useRef(false)
+      const pausingRef = React.useRef(false)
+      // id=234：模型响应中断的对账机制要用的三面旗子。
+      // pausedByUserRef —— 这一轮是用户自己点暂停停的（暂停路径已经写过 interrupted，别再覆盖提示）；
+      // wasRunningRef  —— 上一帧的会话 running，用来捕捉「true → false」这个唯一可得的中断信号；
+      // reconcilingRef —— 对账请求在飞，别叠第二次。
+      const pausedByUserRef = React.useRef(false)
+      const wasRunningRef = React.useRef(false)
+      const reconcilingRef = React.useRef(false)
+      // 已挂起（id=208）：只存内存，不写 plan.json。页面刷新后按「有未完成且无 turn 在跑」
+      // 自然回落为「未开始」，不需要一个跨会话会失效的持久状态字段。
+      const [paused, setPaused] = React.useState(false)
       // 重启中：整个面板盖一层，等宿主把新进程拉起来后自动刷新页面。
       const [restarting, setRestarting] = React.useState(false)
       const [restartTip, setRestartTip] = React.useState('')
@@ -226,7 +255,7 @@
       const impliedRunningId = (() => {
         if (agentRunning !== true) return null
         const first = items.find(
-          (it) => it.execute !== true && it.draft !== true && (typeof it.startedAt !== 'string' || it.startedAt === ''),
+          (it) => it.execute !== true && it.draft !== true && it.failed !== true && (typeof it.startedAt !== 'string' || it.startedAt === ''),
         )
         return first === undefined ? null : first.id
       })()
@@ -236,10 +265,101 @@
       // 还没写 startedAt 的待执行也显示成「执行中」（impliedRunning），
       // 于是会话在跑、模型还没回填的那几秒，上方写 0 条、下面却有一条「执行中」。
       // 现在统一交给 statusOf，两边不可能再对不上。
+      // id=233：statusOf 把 interrupted 排在 running 之前，所以被中断的条目不会再被数进来。
       const runningCount = items.filter((it) => statusOf(it, impliedRunningId === it.id).key === 'running').length
 
-      // 是否有任务正在执行：会话 running（最权威）+ plan.json 的 startedAt + 刚点按钮那一小段。
-      const working = agentRunning || runningCount > 0 || starting
+      // 当前「写着 startedAt 但还没完成」的条目 id：中断时要落盘成「已中断」的就是它们。
+      // 放在这里而不是 pauseWork 里头算，是因为暂停的收尾阶段列表可能已被 sync 换过一轮。
+      const startedIds = items
+        .filter(
+          (it) =>
+            it.execute !== true
+            && it.draft !== true
+            && it.failed !== true
+            && it.interrupted !== true
+            && typeof it.startedAt === 'string'
+            && it.startedAt !== '',
+        )
+        .map((it) => it.id)
+
+      // 是否有任务正在执行（id=233 收紧口径）：只看「会话真的在跑」与「刚点下按钮那几秒」。
+      // 原来还或上了 runningCount（= 有条目写着 startedAt），而 startedAt 在中断后是**故意保留**的
+      // （续做的依据），于是被中断的条目会把 working 永久钉在 true —— 上方按钮一直显示
+      // 「干活中」、开始/暂停全禁用，那正是用户报的 bug。startedAt 是「这条被做过」的痕迹，
+      // 不是「此刻在跑」的证据；后者只有会话 running 能回答。
+      const working = agentRunning || starting
+
+      /**
+       * id=235：渲染层兜底 —— 「发送中 / 暂停中」只描述「这一次点击的请求还在飞」，
+       * 是纯内存态。一旦会话真的跑起来了，发送标记必须立刻让位：
+       * 否则回包晚一点、或者回包干脆丢了，顶栏会一直停在「发送中…」，
+       * 而上方的「干活中」又被 starting 顶着，模型明明在干活、界面上却像卡住。
+       */
+      React.useEffect(() => {
+        if (agentRunning !== true || starting !== true) return undefined
+        startingRef.current = false
+        setStarting(false)
+        return undefined
+      }, [agentRunning, starting])
+
+      /**
+       * id=235：回包丢失的兜底 —— 一次点击的回包等太久就当它丢了，把内存标记放掉。
+       * 「干活中」「发送中…」「暂停中」全部由这些标记驱动，任何一个漏放，
+       * 界面上就会留下一句永远不该再出现的文案（这正是 id=235 要根治的残留）。
+       * 有回包时 finally 会先把它清掉，这里的定时器到点只是空转。
+       */
+      React.useEffect(() => {
+        if (starting !== true) return undefined
+        const timer = window.setTimeout(() => {
+          startingRef.current = false
+          setStarting(false)
+        }, ACTION_STALL_MS)
+        return () => window.clearTimeout(timer)
+      }, [starting])
+      React.useEffect(() => {
+        if (pausing !== true) return undefined
+        const timer = window.setTimeout(() => {
+          pausingRef.current = false
+          setPausing(false)
+        }, ACTION_STALL_MS)
+        return () => window.clearTimeout(timer)
+      }, [pausing])
+
+      /**
+       * id=235：换会话 / 换项目（等价于「连接重建」）时，把全部内存态清零。
+       * 这些标记都不落盘，本来就不该跨会话继承；不清的话切过去会看到上一个会话
+       * 残留的「发送中…」「暂停中」「继续」，而那个会话的条目一条都不在屏幕上。
+       */
+      React.useEffect(() => {
+        startingRef.current = false
+        pausingRef.current = false
+        pausedByUserRef.current = false
+        wasRunningRef.current = false
+        reconcilingRef.current = false
+        setStarting(false)
+        setPausing(false)
+        setPaused(false)
+      }, [sessionId, cwd])
+
+      // id=209：只要有 turn 真的跑起来了，「已挂起」就该自动失效 —— 用户可能在左侧
+      // 对话里直接接着聊，而不是点「继续」。不清的话按钮会一直停在「继续」上。
+      // 放在 effect 里是因为它必须跟着 working 的变化走，且要等暂停请求收尾后再判。
+      React.useEffect(() => {
+        if (working === true && pausingRef.current !== true) {
+          setPaused(false)
+          // id=234：turn 又跑起来了（用户在左侧直接接着聊也算），主动暂停的事实已经不成立，
+          // 不清的话下一轮真断了会被这里误当成「用户自己停的」而跳过对账。
+          pausedByUserRef.current = false
+        }
+      }, [working])
+
+      // 开始 / 暂停 的可用性（id=208）：只由「有没有待办 / 是否在跑 / 有没有挂起」三个既存事实推导，
+      // 不另存一份状态，否则四个来源迟早对不上。
+      const pendingCount = items.filter((it) => it.execute !== true && it.draft !== true).length
+      // 「已挂起」= 主动暂停过，且此刻确实没在跑。pause 请求刚发出、turn 还没停下时仍算执行中。
+      const pausedIdle = paused === true && working !== true
+      const canStart = busy !== true && starting !== true && working !== true && pendingCount > 0
+      const canPause = busy !== true && pausing !== true && working === true
 
       // 自动刷新：按「截止时间」驱动，倒计时只是展示。
       // 旧实现用「倒计时归零」来触发刷新，setInterval 抖动时 left 会停在 1 不归零，
@@ -364,20 +484,25 @@
           setState((prev) => ({ ...prev, error: '计划内容不能为空' }))
           return
         }
-        // 拆解模式：不落一条，交给宿主按项目实际情况拆成 N 条草稿。
-        // 与草稿模式天然一致（产物就是草稿），不与深入模式叠加（改写提示词是另一回事）。
+        // 拆解模式：不落一条，交给宿主按项目实际情况拆成 N 条。
+        // id=262 起不再「深入模式被短路」：两个开关可以同时点亮，
+        // 深入会作用到每一次拆解（见 split()），拆出来的每条子任务都按「做深」的要求写。
         if (splitMode) {
           await split()
           return
         }
-        // 按任务类型自动加前缀：仅回答 → 「仅回答：」，目标 → 「/目标 」，修改 → 不加。
-        // 草稿不加前缀 —— 它不进执行队列，前缀只会污染存下来的原文。
-        const prefix = draftMode ? '' : typePrefix(form.taskType)
-        // 深入模式：先把原文包装成「做深」的提示词，再按任务类型加前缀。
-        // 草稿不包装也不加前缀 —— 草稿存的是用户原话，等转正/再编辑时再决定。
-        const raw = deepMode && !draftMode ? deepPrompt(form.plan) : form.plan
-        const text = raw.trimStart().startsWith(prefix.trim()) || prefix === '' ? raw : `${prefix}${raw}`
+        // 最终提示词统一由 composePrompt 拼（id=262）：草稿存原文、仅回答前缀独占一行、
+        // 深入模式先包模板再叠前缀，且自带幂等与 CRLF 归一。以前这段在 append 里手拼，
+        // split() 那边另有一套，两处规则迟早走散。
+        const text = composePrompt({
+          text: form.plan,
+          taskType: form.taskType,
+          deep: deepMode,
+          draft: draftMode,
+        })
         const data = await run(() =>
+          // mode 由宿主按 taskType 推（客户端没有模式下拉，form.mode 恒为空串）；
+          // 显式传 taskType 就够了，这里保留 mode 字段是为了将来加真下拉时不必改协议。
           call('append', { ...payload, plan: text, mode: form.mode, taskType: form.taskType, draft: draftMode }),
         )
         if (data !== undefined) {
@@ -426,6 +551,10 @@
               mode: form.mode,
               taskType: form.taskType,
               draft: toDraft,
+              // id=262：深入开关以前在拆解分支里被完全丢掉，用户在面板上点亮了「深入」
+              // 却看不出任何差别。现在把意图明确传给宿主，由拆解提示词要求每条子任务
+              // 都按「做深而不是做大」来写。
+              deep: deepMode === true,
             },
             // 拆解要跑一次模型，给足 3 分钟；超时也一定会抛出来 → finally 里摘掉遮罩。
             { timeoutMs: 180000 },
@@ -442,7 +571,13 @@
             if (cut.length > 0) tips.push(`建议砍掉：${cut.join('；')}`)
             if (missing.length > 0) tips.push(`模型提到了不存在的文件：${missing.join('、')}`)
             const where = toDraft ? '草稿' : '待执行'
-            setNotice(`已拆解 ${count} 条到${where}${tips.length > 0 ? ` · ${tips.join(' · ')}` : ''}`)
+            // id=223：这条会带「建议砍掉 / 模型提到了不存在的文件」等附加信息，实测能到 79 字，
+            // 默认 3.8 秒读不完，单独给更长时长。上面的「已拆解过了」是短答复，仍走默认。
+            // id=262：深入模式下补一句，否则用户看不出这个开关到底做了什么。
+            setNotice(
+              `已拆解 ${count} 条到${where}${deepMode ? '（深入）' : ''}${tips.length > 0 ? ` · ${tips.join(' · ')}` : ''}`,
+              NOTICE_LONG_MS,
+            )
           }
           setForm({ plan: '', mode: form.mode, taskType: form.taskType, expanded: false })
           setOpenGroup(toDraft ? 'draft' : 'todo')
@@ -509,30 +644,193 @@
         window.setTimeout(tickOnce, 1500)
       }
 
+      /**
+       * 把「正在跑但被打断了」的条目落盘成「已中断」（id=233）。
+       *
+       * 为什么必须写盘：`startedAt` 是「继续 = 续做而不是重跑」的唯一依据，所以中断时**不能**清空它；
+       * 而 `statusOf` 原来只要有 `startedAt` 就判「执行中」，于是被中断的条目会永久显示
+       * 「执行中」、上方按钮永久显示「干活中」。新增的 `interrupted` 标记就是为了在这种
+       * 「startedAt 还在、但 turn 已经停了」的状态下给出正确标签 —— 它必须持久化，
+       * 因为「已挂起」原本是纯内存态（`paused`），刷新页面就丢，刷新后又变回「执行中」。
+       *
+       * 只挑「有 startedAt 且未完成、未中断」的条目：还没写 startedAt 的那条（`impliedRunningId`）
+       * 不标中断 —— 它本来就没有开工痕迹，标了反而会在真正开跑时一直挂着「已中断」。
+       */
+      const markInterrupted = async (ids, value = true) => {
+        const list = [...new Set(ids)]
+        if (list.length === 0) return 0
+        let done = 0
+        for (const id of list) {
+          try {
+            await call('update', { ...payload, id, patch: { interrupted: value } })
+            done += 1
+          } catch {
+            // 单条写失败不牵连同批其他条目：这一条下次中断/刷新时还会被再判一次。
+          }
+        }
+        // 乐观更新：把标记先落进本地列表，界面立刻从「执行中」跳到「已中断」，
+        // 不必等下一轮 sync（自动刷新最快也要 3~5 秒）。
+        if (done > 0) {
+          setState((prev) => {
+            if (prev.data === null) return prev
+            return {
+              ...prev,
+              data: {
+                ...prev.data,
+                items: (prev.data.items ?? []).map((it) => (list.includes(it.id) ? { ...it, interrupted: value } : it)),
+              },
+            }
+          })
+        }
+        return done
+      }
+
       /** 手动开工：把「开始干活」真的发进当前会话（左侧对话里能看到），
-       * 由模型按 plan-tasks 技能去取待执行计划。 */
+       * 由模型按 plan-tasks 技能去取待执行计划。
+       * id=209 起兼任「继续」：已挂起时发的是「继续干活」，语义上与首次开工区分开。 */
       const startWork = async () => {
-        if (starting) return
+        // 按钮 disabled 只是第一层：这里再挡一次，避免「执行中连点」重复灌提示词。
+        // working 为 false 但 paused 为 true 时放行 —— 那正是「继续」的入口。
+        if (startingRef.current || starting || working) return
+        const text = paused ? RESUME_TEXT : KICKOFF_TEXT
+        startingRef.current = true
         setStarting(true)
+        // 续做前先记下要摘掉「已中断」标记的那一条：`startedAt` 还在，摘掉标记后
+        // 它会自动回到「执行中」—— 用户点的是「继续」，界面就该显示在跑。
+        // 只摘**数组里最靠前**的那一条：技能规定多条带 startedAt 时只续做最靠前的那条，
+        // 全部摘掉会让后面那些明明没在跑的条目也显示成「执行中」。
+        const resumeOne = (items ?? []).find(
+          (it) => it.interrupted === true && it.execute !== true && it.draft !== true,
+        )
+        const resumeIds = resumeOne === undefined ? [] : [resumeOne.id]
+        setPaused(false)
         try {
           let sent = false
           try {
-            sent = await kickoffViaClient(ctx, sessionId, KICKOFF_TEXT)
+            sent = await kickoffViaClient(ctx, sessionId, text)
           } catch (error) {
             sent = false
             if (error instanceof Error && error.message !== '') throw error
           }
-          if (!sent) await call('kickoff', { ...payload, text: KICKOFF_TEXT })
-          setNotice(`已发送「${KICKOFF_TEXT}」`)
+          if (!sent) await call('kickoff', { ...payload, text })
+          setNotice(`已发送「${text}」`)
+          // id=234：新一轮开跑了，主动暂停的标记要撤掉，否则下一轮中断不会被对账处理。
+          pausedByUserRef.current = false
+          // 发送成功了才摘标记：发不出去还留在「已中断」是对的，不能被这次点击洗掉。
+          if (resumeIds.length > 0) await markInterrupted(resumeIds, false)
         } catch (error) {
+          // 发送失败要把「已挂起」还回去，否则界面会显示「继续」但其实什么都没发出去。
+          if (text === RESUME_TEXT) setPaused(true)
           setState((prev) => ({
             ...prev,
-            error: `发送「${KICKOFF_TEXT}」失败：${error instanceof Error ? error.message : String(error)}`,
+            error: `发送「${text}」失败：${error instanceof Error ? error.message : String(error)}`,
           }))
         } finally {
+          startingRef.current = false
           setStarting(false)
         }
       }
+
+      /**
+       * 挂起当前执行（id=208）。
+       *
+       * 只中止当前 turn，plan.json 里已写进去的 startedAt / note / execute
+       * 一个字段都不动，所以再点「开始」能接着做而不是从头来。
+       * 优先走浏览器侧的 `session.cancel()`；那条路不可用（没有绑定、旧版本）才回落到宿主 cancel 路由。
+       *
+       * id=233：收尾阶段必须把「正写着 startedAt 的那几条」落盘成 `interrupted: true`。
+       * 只设内存里的 `paused` 不够 —— 刷新页面就丢，条目又变回「执行中」，那正是用户报的病。
+       */
+      const pauseWork = async () => {
+        // 与 canPause 对齐：忙、正在发暂停、或此刻根本没在跑，都不发第二个 cancel。
+        if (pausingRef.current || pausing || starting || working !== true) return
+        pausingRef.current = true
+        setPausing(true)
+        // 先拍一张快照：cancel 成功后列表可能已经被 sync 换过一轮，那时再算就晚了。
+        const interruptedIds = startedIds
+        // 中止是否真的被受理：只有受理了才把条目判成「已中断」。
+        // 两条路都失败时 turn 还在跑，条目继续显示「执行中」才是对的。
+        let accepted = false
+        try {
+          let stopped = false
+          try {
+            stopped = await stopViaClient(ctx, sessionId)
+          } catch (error) {
+            stopped = false
+            if (error instanceof Error && error.message !== '') throw error
+          }
+          if (!stopped) await call('cancel', payload)
+          accepted = true
+          // id=234：这一轮是用户主动停的，别再让「模型响应中断」的对账去覆盖提示文案。
+          pausedByUserRef.current = true
+          setPaused(true)
+          setNotice('已挂起当前执行，进度已保留')
+        } catch (error) {
+          setState((prev) => ({
+            ...prev,
+            error: `暂停失败：${error instanceof Error ? error.message : String(error)}`,
+          }))
+        } finally {
+          // 放在 finally 里：无论走哪条路径、是否已经抛错，只要中止确实被受理，
+          // 「执行中」这个显示就已经是错的，必须对齐成「已中断」。
+          // 写盘失败只影响单条，markInterrupted 内部已经吞掉逐条异常。
+          if (accepted) await markInterrupted(interruptedIds)
+          pausingRef.current = false
+          setPausing(false)
+        }
+      }
+
+      /**
+       * id=234：模型响应中断（断流 / 超时 / 请求报错）时的状态同步。
+       *
+       * 这类中断拿不到任何「原因」：客户端能观测到的唯一信号就是会话 running 从 true 翻成 false
+       * —— 客户端和宿主都没有 turn 结束事件的订阅（id=231 已核实 `ctx.on(` 全库零命中）。
+       * 所以这里做的是**翻下去之后的对账**：等 INTERRUPT_SETTLE_MS 让收尾写盘落定，再回读一次
+       * plan.json；如果还有条目「写着 startedAt 却没完成」，说明这一轮没走到回填 execute 就被掐断了。
+       *
+       * 为什么不会误伤正常收工：模型收工前一定先写 execute=true，那时这些条目已经不在
+       * 「未完成 + 有 startedAt」的集合里，对账结果是空的，什么都不会写。
+       * 为什么以磁盘为准而不是内存 items：中断这段时间自动刷新可能一次都没成功过，
+       * 内存里的列表可能还停在开工前。
+       * 为什么跳过主动暂停：pauseWork 已经写过一遍 interrupted，再写一次只会在界面上
+       * 用「执行已中断」盖掉「已挂起当前执行」这句更准确的提示。
+       */
+      React.useEffect(() => {
+        const was = wasRunningRef.current
+        wasRunningRef.current = agentRunning === true
+        if (was !== true || agentRunning === true) return undefined
+        if (pausedByUserRef.current === true || reconcilingRef.current === true) return undefined
+        reconcilingRef.current = true
+        let cancelled = false
+        const timer = setTimeout(() => {
+          void (async () => {
+            try {
+              const data = await call('read', { ...payload, lite: true })
+              if (cancelled || data === null || typeof data !== 'object') return
+              const losers = (data.items ?? []).filter(
+                (it) =>
+                  it.execute !== true
+                  && it.draft !== true
+                  && it.interrupted !== true
+                  && typeof it.startedAt === 'string'
+                  && it.startedAt !== '',
+              )
+              if (losers.length === 0) return
+              const done = await markInterrupted(losers.map((it) => it.id))
+              if (done > 0) setNotice(`执行已中断（${done} 条）`, NOTICE_LONG_MS)
+            } catch {
+              // 对账失败不弹错：下一次 running 翻下去还会再来一次，别用噪音打搅用户。
+            } finally {
+              if (!cancelled) reconcilingRef.current = false
+            }
+          })()
+        }, INTERRUPT_SETTLE_MS)
+        return () => {
+          cancelled = true
+          window.clearTimeout(timer)
+          reconcilingRef.current = false
+        }
+      }, [agentRunning, sessionId, cwd])
 
       /** 拖拽落位：只在「待执行」组内调整先后，随后整表重排并落盘。 */
       // 提交一整份「待执行组」的 id 顺序：Host 只认整表顺序，
@@ -577,6 +875,13 @@
       // 正在执行的那条永远留在最上面（它是当前正在跑的，不能被打断）。
       const pinTop = async (id) => {
         const todo = (state.data?.items ?? []).filter((it) => it.execute !== true && it.draft !== true)
+        // id=244：拦截放在这里，而不是只靠按钮消失。
+        // 置顶的唯一入口虽然是 `50-item.js` 的按钮，但按钮消失只是「看不见入口」，
+        // 不是「没有入口」——卡片外层、以后可能加的右键菜单、键盘快捷键，
+        // 任何能拿到 id 的路径最终都汇到这一个函数。判在这里才算真的禁掉。
+        // 同时它是写 order 的唯一出口（下一站 commitOrder → 宿主 reorder），
+        // 提前 return 就不会动排序权重，也不会发出任何请求。
+        if (todo.some((it) => it.id === id && (it.decomposeKey ?? '') !== '')) return
         const order = todo.map((it) => it.id)
         const fromIndex = order.indexOf(id)
         if (fromIndex < 0) return
@@ -602,13 +907,21 @@
         setState((prev) => ({ ...prev, error: '' }))
         try {
           for (const id of list) {
-            await call('update', { ...payload, id, patch: draft ? { draft: true } : { draft: false, clearTime: true } })
+            // id=233：转组时顺手摘掉「已中断」标记 —— 换组意味着用户重新安排了这条，
+            // 再挂着上一次中断的标记会误导（尤其转回待执行时，会一进门就显示「已中断」）。
+            await call('update', {
+              ...payload,
+              id,
+              patch: draft ? { draft: true, interrupted: false } : { draft: false, clearTime: true, interrupted: false },
+            })
           }
           // 乐观地把标记先改进本地数据，让条目立刻跳组，避免等 sync 的那一下闪烁。
           setState((prev) => {
             if (prev.data === null) return prev
             const next = (prev.data.items ?? []).map((it) =>
-              list.includes(it.id) ? { ...it, draft: draft, ...(draft ? {} : { startedAt: '', time: 0 }) } : it,
+              list.includes(it.id)
+                ? { ...it, draft: draft, interrupted: false, ...(draft ? {} : { startedAt: '', time: 0 }) }
+                : it,
             )
             return { ...prev, data: { ...prev.data, items: next } }
           })
@@ -668,8 +981,8 @@
             setNotice(
               reviewed
                 ? `已审核通过 #${id}${
-                    Number(data?.trimmedCount) > 0 ? ` · 超上限，已清理最旧 ${data.trimmedCount} 条` : ''
-                  }`
+                    Number(data?.trimmedCount) > 0 ? ` · 超过保留条数，已清理最旧 ${data.trimmedCount} 条` : ''
+                  }${backupSuffix(data)}`
                 : value.review === false
                   ? `已取消审核 #${id}`
                   : typeof value.plan === 'string'
@@ -805,31 +1118,46 @@
       }
 
       /**
-       * 「已审核」上限下拉的 change（id=188）。
+       * 「需要保留的 note 条数」下拉的 change（id=188，id=268 改名/换档）。
        *
-       * 值只有一个来源——宿主读回的 `data.settings.reviewedLimit`，所以这里不存本地副本：
-       * 下拉显示的就是磁盘上的真值，不会出现「界面选了 100、文件里还是 0」的错位。
+       * 值只有一个来源——宿主读回的 `data.settings.noteLimit`，所以这里不存本地副本：
+       * 下拉显示的就是磁盘上的真值，不会出现「界面选了 100、文件里还是 200」的错位。
        *
-       * 裁剪本身放在宿主写设置时做（见 #189），不在客户端算：两边各算一遍 FIFO，
+       * 裁剪本身放在宿主写设置时做（见 #189/#269），不在客户端算：两边各算一遍 FIFO，
        * 一旦排序方向理解不同就会删错条目。这里只负责「写回 + 重读 + 提示」。
        */
-      const changeReviewedLimit = async (value) => {
+      const changeNoteLimit = async (value) => {
         const next = Number(value)
         await run(async () => {
-          const saved = await call('settings', { ...payload, patch: { reviewedLimit: next } })
+          const saved = await call('settings', { ...payload, patch: { noteLimit: next } })
           const cut = Number(saved?.trimmedCount) || 0
           setNotice(
             cut > 0
-              ? `已审核上限 ${next === 0 ? '无限' : next} · 清理最旧 ${cut} 条`
-              : `已审核上限：${next === 0 ? '无限' : next}`,
+              ? `保留 note ${next} 条 · 清理最旧 ${cut} 条${backupSuffix(saved)}`
+              : `保留 note：${next} 条`,
           )
+          return call('read', { ...payload, lite: true })
+        })
+      }
+
+      /**
+       * 「裁剪前备份」复选开关（id=256）。
+       *
+       * 与保留条数下拉同款：值只有一个来源——宿主读回的 `settings.backupBeforeTrim`，
+       * 这里不存本地副本，勾选状态永远等于磁盘上的真值。
+       * 勾选立刻落盘（不用等下一次裁剪），因为用户预期的就是「从现在起都备份」。
+       */
+      const changeBackupBeforeTrim = async (value) => {
+        await run(async () => {
+          await call('settings', { ...payload, patch: { backupBeforeTrim: value === true } })
+          setNotice(value === true ? '裁剪前会备份到 .plan/planBack.json' : '裁剪前不再备份')
           return call('read', { ...payload, lite: true })
         })
       }
 
       React.useEffect(() => {
         if (notice === '') return undefined
-        const timer = setTimeout(() => setNotice(''), 2600)
+        const timer = setTimeout(() => setNoticeState(''), noticeMsRef.current)
         return () => clearTimeout(timer)
       }, [notice])
 
@@ -854,10 +1182,11 @@
 
       return h(
         'div',
-        { className: 'plt-root', style: { position: 'relative' } },
+        { className: 'plt-root', ref: rootRef, style: { position: 'relative' } },
         h(
           'div',
-          { className: 'plt-top' },
+          // has-error（id=210）：让顶栏两个按钮跟着错误提示一起描红，操作失败时不用靠猜。
+          { className: state.error === '' ? 'plt-top' : 'plt-top has-error' },
           h('span', { className: 'plt-title' }, `任务列表 · ${items.length}`),
           // 提交/审核的提示放在「自动刷新」左侧，不再占用下方空间。
           notice !== '' ? h('span', { className: 'plt-notice' }, notice) : null,
@@ -865,7 +1194,7 @@
             'button',
             {
               className: `plt-btn plt-auto${auto ? ' on' : ''}`,
-              title: auto ? `自动刷新已开启，${tick} 秒后重新读取 plan.json` : '自动刷新已关闭',
+              'data-tip': auto ? `自动刷新已开启，${tick} 秒后重新读取 plan.json` : '自动刷新已关闭',
               onClick: () => setAuto((prev) => !prev),
             },
             h(
@@ -874,10 +1203,64 @@
             ),
             h('span', null, auto ? `${tick}s` : '自动'),
           ),
+          // 开始 / 暂停（id=207 渲染，id=208 接逻辑）：插在「自动刷新」与「刷新」之间，
+          // 即口语需求说的「任务列表右边、倒计时左边」。两个按钮都沿用 .plt-btn 的标签结构
+          // （inline-flex + 图标 + 文字），与刷新/重启按钮视觉同族。
+          // 可用性全部由 canStart / canPause 推导（见上方 working 一带），不在别处另存状态：
+          //   未开始 → 开始可点、暂停禁用；执行中 → 反过来；已挂起 → 开始变「继续」、暂停禁用；
+          //   全部完成（无待办）→ 两个都禁用；busy（有请求在飞）→ 两个都禁用。
           h(
             'button',
-            { className: 'plt-btn', disabled: busy, title: '立即重新读取 plan.json', onClick: refresh },
-            '刷新',
+            {
+              className: `plt-btn plt-start${pausedIdle ? ' is-resume' : ''}`,
+              disabled: canStart !== true,
+              'data-tip':
+                pendingCount === 0
+                  ? '没有待执行的计划'
+                  : pausedIdle
+                    ? `从挂起处继续（发出「${RESUME_TEXT}」），已完成的条目不会重做`
+                    : `让模型开始执行待办计划（发出「${KICKOFF_TEXT}」）`,
+              onClick: (e) => {
+                e.stopPropagation()
+                void startWork()
+              },
+            },
+            h(PlayIcon, { size: 12 }),
+            h('span', null, pausedIdle ? '继续' : '开始'),
+          ),
+          h(
+            'button',
+            {
+              className: 'plt-btn plt-pause',
+              disabled: canPause !== true,
+              'data-tip': working ? '挂起当前执行，已完成的进度会保留' : '当前没有正在执行的任务',
+              onClick: (e) => {
+                e.stopPropagation()
+                void pauseWork()
+              },
+            },
+            pausing ? h(SpinnerIcon, { size: 12 }) : h(PauseIcon, { size: 12 }),
+            h('span', null, pausing ? '暂停中' : '暂停'),
+          ),
+          h(
+            'button',
+            { className: 'plt-btn plt-refresh', disabled: busy, 'data-tip': '立即重新读取 plan.json', onClick: refresh },
+            // 转圈位（id=196/197/198）：图标默认静止（spin:false 只画圆弧、不自带动画），
+            // 转不转完全由这里的状态类决定。两类互斥，切换时容器尺寸不变、不重排。
+            //   spinning = 这一次读写请求在飞（busy） 或 模型正在干活（working）
+            //   idle     = 两者皆无
+            // 注意不要接静默自动刷新（sync 不置 busy），否则每 5 秒图标都要抖一下。
+            h(
+              'span',
+              {
+                className: `plt-refresh-ico${busy || working ? ' spinning' : ' idle'}`,
+                'aria-hidden': 'true',
+                'data-busy': busy ? 'true' : 'false',
+                'data-working': working ? 'true' : 'false',
+              },
+              h(SpinnerIcon, { size: 12, spin: false }),
+            ),
+            h('span', { className: 'plt-refresh-label' }, '刷新'),
           ),
           // 重启：改了宿主代码（lib/index.js）后必须整进程重开才生效，这里一键做完。
           h(
@@ -885,7 +1268,7 @@
             {
               className: 'plt-btn plt-restart',
               disabled: busy || restarting,
-              title: '重启 dsh web（改过宿主代码后用），完成后页面会自动刷新',
+              'data-tip': '重启 dsh web（改过宿主代码后用），完成后页面会自动刷新',
               onClick: (e) => {
                 e.stopPropagation()
                 void doRestart()
@@ -944,8 +1327,12 @@
                           selectable,
                           // 所属分组，决定「复制 ID / 复制内容」这类组内专属按钮是否出现。
                           groupKey,
-                          // 置顶按钮只出现在待执行组。
-                          canPin: groupKey === 'todo',
+                          // 置顶按钮只出现在待执行组，且拆分出来的子任务不给（id=243）。
+                          // 判定依据只能是 `decomposeKey`：`[拆] ` 是宿主拼在 name 上的文案，
+                          // 用户改个名就骗过去了，而 key 是落盘事实（宿主 `dedupeKeyOf` 生成）。
+                          // 为什么不许置顶：拆解出来的是一组按顺序铺开的工作单元，把它们
+                          // 挑一条顶到最前面，等于绕过拆解给出的执行顺序，用户看着也乱。
+                          canPin: groupKey === 'todo' && (item.decomposeKey ?? '') === '',
                           onPinTop: () => void pinTop(item.id),
                           // 草稿组专属：单条「转为待执行」+ 正文可直接编辑。
                           onPromote: () => void moveToGroup([item.id], false),
@@ -996,6 +1383,11 @@
                         .filter((group) => group.alwaysShow === true || group.list.length > 0)
                         .map((group) => {
                           const isOpen = openGroup === group.key
+                          // id=238：这一组里有没有「正在执行」的条目 —— 唯一口径还是 statusOf，
+                          // 与卡片上那个「执行中」标签逐条对齐（含 impliedRunning 那一条）。
+                          // 必须挂在组容器上：收起时组内卡片整块不渲染，后代选择器无从判断（见 id=237 定位）。
+                          // 刻意不含 starting：刚点下「开始」、模型还没接手的那几秒组里一条执行中的都没有。
+                          const isRunning = group.list.some((it) => statusOf(it, impliedRunningId === it.id).key === 'running')
                           const pendingIds = group.key === 'unreviewed' ? group.list.map((item) => item.id) : []
                           const allPicked = pendingIds.length > 0 && pendingIds.every((id) => picked.has(id))
                           // 「已审核」组同样支持勾选，用于批量删除。
@@ -1006,33 +1398,71 @@
                           const allPickedDraft = draftIds.length > 0 && draftIds.every((id) => pickedDraft.has(id))
                           return h(
                             'div',
-                            { key: group.key, className: `plt-group plt-group-${group.key}${isOpen ? ' open' : ''}` },
+                            { key: group.key, className: `plt-group plt-group-${group.key}${isOpen ? ' open' : ''}${isRunning ? ' is-running' : ''}`, 'data-running': isRunning ? 'true' : 'false' },
                             h(
                               'div',
                               {
                                 className: `plt-group-h${isOpen ? ' open' : ''}${isOpen ? '' : arriveGroups.has(group.key) ? ' plt-arrive' : ''}`,
                                 onClick: () => setOpenGroup(isOpen ? null : group.key),
+                                'aria-expanded': isOpen ? 'true' : 'false',
                               },
                               h('span', { className: 'plt-caret' }, h(CaretIcon, { size: 13 })),
                               h('span', { className: 'plt-group-name' }, group.title),
                               h('span', { className: 'plt-group-count' }, String(group.list.length)),
-                              // 「已审核」上限下拉（id=188）。档位列表由宿主 constants.js 下发，
+                              // id=240：组收起、里面还有条目在跑时，给一句看得见的提示。
+                              // 展开态不显示 —— 那时卡片自己的「执行中」标签就在眼前，再说一遍是噪音。
+                              // 文字 + 转圈都放进去：侧栏很窄时 aria/title 是读屏与悬停的兜底。
+                              isRunning && isOpen !== true
+                                ? h(
+                                    'span',
+                                    { className: 'plt-group-run', 'data-tip': '这一组里还有任务正在执行', 'aria-label': '正在执行' },
+                                    h(SpinnerIcon, { size: 11 }),
+                                    h('span', { className: 'plt-group-run-txt' }, '正在执行'),
+                                  )
+                                : null,
+                              // 「需要保留的 note 条数」下拉（id=188，id=268 改名/换档）。
+                              // 档位列表由宿主 constants.js 下发（100/200/500/1000），
                               // 这里不抄第二份数组；宿主版本太旧、没有这个字段时整块不渲染，
                               // 避免出现一个点下去只会报错的死控件。
-                              group.key === 'reviewed' && Array.isArray(state.data?.reviewedLimits)
+                              group.key === 'reviewed' && Array.isArray(state.data?.noteLimits)
                                 ? h(
                                     'select',
                                     {
                                       className: 'plt-limit',
-                                      value: String(state.data?.settings?.reviewedLimit ?? 0),
+                                      value: String(state.data?.settings?.noteLimit ?? 200),
                                       disabled: busy,
-                                      title: '已审核最多保留多少条；超出按先进先出删掉最旧的，选「无限」不删',
+                                      'aria-label': '需要保留的 note 条数',
+                                      'data-tip': '需要保留的 note 条数；超出按先进先出删掉最旧的 note',
                                       onClick: (e) => e.stopPropagation(),
-                                      onChange: (e) => void changeReviewedLimit(e.target.value),
+                                      onChange: (e) => void changeNoteLimit(e.target.value),
                                     },
-                                    state.data.reviewedLimits.map((n) =>
-                                      h('option', { key: String(n), value: String(n) }, n === 0 ? '无限' : String(n)),
+                                    state.data.noteLimits.map((n) =>
+                                      h('option', { key: String(n), value: String(n) }, String(n)),
                                     ),
+                                  )
+                                : null,
+                              // 「裁剪前先备份」开关（id=256）。只在真会裁剪时才有意义：
+                              // 保留条数恒为正（不再有「无限」档），所以这里只校验档位列表存在。
+                              group.key === 'reviewed' &&
+                              Number(state.data?.settings?.noteLimit ?? 0) > 0 &&
+                              Array.isArray(state.data?.noteLimits)
+                                ? h(
+                                    'label',
+                                    {
+                                      className: `plt-backup${state.data?.settings?.backupBeforeTrim === true ? ' is-on' : ''}`,
+                                      'data-tip':
+                                        '勾选后，每次裁剪已审核条目前先把完整 plan.json 备份成 .plan/planBack.json（覆盖上一份）',
+                                      onClick: (e) => e.stopPropagation(),
+                                    },
+                                    h('input', {
+                                      type: 'checkbox',
+                                      className: 'plt-backup-box',
+                                      checked: state.data?.settings?.backupBeforeTrim === true,
+                                      disabled: busy,
+                                      'aria-label': '裁剪前备份完整 JSON',
+                                      onChange: (e) => void changeBackupBeforeTrim(e.target.checked),
+                                    }),
+                                    h('span', { className: 'plt-backup-txt' }, '备份'),
                                   )
                                 : null,
                             ),
@@ -1049,7 +1479,7 @@
                                           { className: 'plt-bulk' },
                                           h(
                                             'label',
-                                            { className: 'plt-check', title: allPicked ? '取消全选' : '全选本组全部' },
+                                            { className: 'plt-check', 'data-tip': allPicked ? '取消全选' : '全选本组全部' },
                                             h('input', {
                                               type: 'checkbox',
                                               checked: allPicked,
@@ -1070,7 +1500,7 @@
                                             {
                                               className: 'plt-btn plt-bulk-pass',
                                               disabled: busy || picked.size === 0,
-                                              title: '把勾选的计划一次性审核通过',
+                                              'data-tip': '把勾选的计划一次性审核通过',
                                               onClick: (e) => {
                                                 e.stopPropagation()
                                                 void approvePicked([...picked])
@@ -1087,7 +1517,7 @@
                                           { className: 'plt-bulk plt-bulk-danger' },
                                           h(
                                             'label',
-                                            { className: 'plt-check', title: allPickedDone ? '取消全选' : '全选本组全部' },
+                                            { className: 'plt-check', 'data-tip': allPickedDone ? '取消全选' : '全选本组全部' },
                                             h('input', {
                                               type: 'checkbox',
                                               checked: allPickedDone,
@@ -1108,7 +1538,7 @@
                                             {
                                               className: 'plt-btn plt-bulk-del',
                                               disabled: busy || pickedDone.size === 0,
-                                              title: '把勾选的已审核计划一次性删除',
+                                              'data-tip': '把勾选的已审核计划一次性删除',
                                               onClick: (e) => {
                                                 e.stopPropagation()
                                                 void removePickedDone([...pickedDone])
@@ -1125,7 +1555,7 @@
                                           { className: 'plt-bulk' },
                                           h(
                                             'label',
-                                            { className: 'plt-check', title: allPickedDraft ? '取消全选' : '全选本组全部' },
+                                            { className: 'plt-check', 'data-tip': allPickedDraft ? '取消全选' : '全选本组全部' },
                                             h('input', {
                                               type: 'checkbox',
                                               checked: allPickedDraft,
@@ -1143,7 +1573,7 @@
                                             {
                                               className: 'plt-btn plt-bulk-del',
                                               disabled: busy || pickedDraft.size === 0,
-                                              title: '把勾选的草稿一次性删除',
+                                              'data-tip': '把勾选的草稿一次性删除',
                                               onClick: (e) => {
                                                 e.stopPropagation()
                                                 void removePickedDone([...pickedDraft])
@@ -1156,7 +1586,7 @@
                                             {
                                               className: 'plt-btn plt-bulk-promote',
                                               disabled: busy || pickedDraft.size === 0,
-                                              title: '把勾选的草稿一次性转为待执行',
+                                              'data-tip': '把勾选的草稿一次性转为待执行',
                                               onClick: (e) => {
                                                 e.stopPropagation()
                                                 void moveToGroup([...pickedDraft], false)
@@ -1188,7 +1618,7 @@
                                             {
                                               className: `plt-btn plt-bulk-go${working ? ' is-working' : ''}`,
                                               disabled: busy || working || starting,
-                                              title:
+                                              'data-tip':
                                                 working
                                                   ? '模型正在干活，等它完成再开始下一条'
                                                   : `向左侧会话发送「${KICKOFF_TEXT}」，开始执行待执行里的计划`,
@@ -1263,7 +1693,7 @@
                               type: 'button',
                               className: `plt-chip${form.taskType === type ? ' active' : ''}`,
                               disabled: busy,
-                              title: `任务类型：${type}`,
+                              'data-tip': `任务类型：${type}`,
                               onClick: () => setForm({ ...form, taskType: type }),
                             },
                             h('span', { className: 'plt-chip-ico' }, h(ModeIcon, { kind: type, size: 13 })),
@@ -1288,7 +1718,7 @@
                               disabled: busy || splitting,
                               'aria-pressed': splitMode ? 'true' : 'false',
                               'aria-label': '拆解模式（叠加开关，可与其他任务类型同时生效）',
-                              title: splitMode
+                              'data-tip': splitMode
                                 ? `拆解模式已开启：发送时按项目情况自动拆成多条，落在「${draftMode ? '草稿' : '待执行'}」（点击关闭）`
                                 : `开启拆解模式：发送时按项目情况把这段话拆成几条${draftMode ? '草稿' : '待执行任务'}`,
                               onClick: () => setSplitMode(!splitMode),
@@ -1303,16 +1733,25 @@
                   ),
                   // 深入开关（在草稿开关左侧，同款圆形造型）：默认不选中；
                   // 点亮后「发送」会把输入框里的任务改写为「要求做深」的提示词。
+                  // id=262：草稿模式下深入本来就不生效（草稿只存原话），以前按钮照样能点、
+                  // tip 照样承诺「会改写」，用户点了却发现什么都没变。现在直接置灰并说明原因。
                   h(
                     'button',
                     {
                       type: 'button',
                       className: `plt-deep-toggle${deepMode ? ' on' : ''}`,
-                      disabled: busy,
+                      disabled: busy || draftMode,
                       'aria-pressed': deepMode ? 'true' : 'false',
-                      title: deepMode
-                        ? '深入模式已开启：发送时会改写提示词，要求把任务做深（点击关闭）'
-                        : '开启深入模式：发送时自动把任务改写成「做深而不是做大」的提示词',
+                      'aria-disabled': draftMode ? 'true' : undefined,
+                      'data-tip': draftMode
+                        ? '草稿模式只存原话、不改写提示词，先关掉草稿才能用深入模式'
+                        : deepMode
+                          ? splitMode
+                            ? '深入模式已开启：拆解时要求把每一条子任务都做深（点击关闭）'
+                            : '深入模式已开启：发送时会改写提示词，要求把任务做深（点击关闭）'
+                          : splitMode
+                            ? '开启深入模式：拆解时要求把每一条子任务都做深'
+                            : '开启深入模式：发送时自动把任务改写成「做深而不是做大」的提示词',
                       'aria-label': '深入模式',
                       onClick: () => setDeepMode(!deepMode),
                     },
@@ -1327,7 +1766,7 @@
                       className: `plt-draft-toggle${draftMode ? ' on' : ''}`,
                       disabled: busy,
                       'aria-pressed': draftMode ? 'true' : 'false',
-                      title: draftMode
+                      'data-tip': draftMode
                         ? '草稿模式已开启：发送将存入「草稿」组（点击关闭）'
                         : '开启草稿模式：发送不再排入待执行，只存进「草稿」组',
                       'aria-label': '草稿模式',
@@ -1341,7 +1780,7 @@
                       type: 'button',
                       className: 'plt-send',
                       disabled: busy || splitting,
-                      title: splitting
+                      'data-tip': splitting
                         ? '正在拆解，请稍候…'
                         : splitMode
                           ? `拆解成多条，落在「${draftMode ? '草稿' : '待执行'}」（Shift+Enter）`
@@ -1362,7 +1801,7 @@
           { className: 'plt-foot' },
           h(
             'span',
-            { className: 'plt-foot-text', title: state.data?.planPath ?? '.plan/plan.json' },
+            { className: 'plt-foot-text', 'data-tip': state.data?.planPath ?? '.plan/plan.json' },
             state.data?.planPath ?? '.plan/plan.json',
             // 技能是插件内置的虚拟技能（`ctx.skills.register`），不落到项目目录，
             // 所以不再有「未创建 / 已就绪」之分，也不需要任何同步入口。
@@ -1380,7 +1819,8 @@
               h(
                 'div',
                 { className: 'plt-split-card' },
-                h(SpinnerIcon, { size: 15 }),
+                // id=213：卡片整体放大一档，转圈图标跟着从 15 抬到 18，免得看着头重脚轻。
+                h(SpinnerIcon, { size: 18 }),
                 h(
                   'span',
                   { className: 'plt-split-text' },

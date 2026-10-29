@@ -12,20 +12,48 @@
    圆角/边框/阴影都恢复四边对称（贴边时代的 border-right:none、单侧投影都是为贴合用的）。 */
 .plt-split-card{
   position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-  display:flex;align-items:center;gap:9px;
-  max-width:min(80%,250px);
-  padding:11px 15px;
-  border-radius:12px;
-  border:1px solid rgba(255,255,255,.16);
-  background:rgba(30,34,42,.96);
-  box-shadow:0 12px 30px rgba(0,0,0,.38);
-  color:#f2f4f7;font-size:13.5px;line-height:1.5;
+  display:flex;align-items:center;gap:12px;
+  /* id=213：原来是纯内容撑开（实测恒为 164×64.3，跟面板宽高一点关系都没有），
+     看着像个小气泡，用户反馈「有点小」。这里按面板宽度给个显式宽度（76% → 封顶 240px），
+     纵向 padding 一并加厚，让卡片整体放大 ~1.45 倍而**宽高比基本不变**（原 2.55:1）。
+     id=214：补上下限。四条全挂在面板尺寸上（cqw/cqh 以 .plt-root 为容器，见 10-topbar.js:13），
+     不写死像素：
+       · min-width 是硬下限（150px），保证极窄侧栏下不塌成一条；
+         但它自身再被 92cqw 夹一次，所以「抬高下限」永远不会导致横向溢出。
+       · max-width 是兜底封顶，比 width 宽一档，正常永远不生效 —— 只有将来 width 被改小/内容
+         撑破时才会接管，避免横向跑出面板。
+       · min-height / max-height 夹住纵向：矮面板下不让卡片高过面板（否则内容被面板裁掉），
+         此时卡片内部自己滚动（overflow:auto），比静默裁切可读。
+     width/max-width 这里刻意用 cqw 而不是百分比 —— 百分比算的是包含块（遮罩），
+     与 min() 混用推不直观；cqw 就是面板宽度的 1%，一眼可算。 */
+  width:min(76cqw,240px);
+  min-width:min(150px,92cqw);
+  max-width:min(92cqw,300px);
+  min-height:min(64px,28cqh);
+  max-height:min(78cqh,240px);
+  overflow:auto;
+  box-sizing:border-box;
+  /* id=215：内边距从 22/20 改成 20/22 —— 横向略大于纵向是卡片的常规比例，
+     原来的「纵向比横向还厚」让两行字看着被上下夹扁。 */
+  padding:20px 22px;
+  /* 圆角对齐输入区那张「悬浮卡片」（.plt-composer 的 14px），不再自成一套 12px。 */
+  border-radius:14px;
+  border:1px solid rgba(124,162,232,.22);
+  /* 底色跟着输入区那套走：上亮下暗的极淡渐变（模拟顶部受光），不再是一块纯色。 */
+  background:linear-gradient(180deg,rgba(28,36,50,.97),rgba(20,27,38,.97));
+  /* 阴影分三层，和输入区卡片同一套「贴地影 + 中距扩散 + 远距弥散」再加一道顶部内高光：
+     单层大投影会让卡片看着像贴在纸上，分层才有厚度。 */
+  box-shadow:0 2px 4px rgba(3,9,22,.34),0 12px 26px -10px rgba(4,12,30,.6),0 32px 60px -26px rgba(8,20,48,.66),inset 0 1px 0 rgba(158,190,246,.14);
+  color:#f2f4f7;font-size:15px;line-height:1.6;
   pointer-events:auto;
   animation:plt-split-in .22s cubic-bezier(.22,.9,.28,1) both;
 }
-.plt-split-card .plt-split-text{display:flex;flex-direction:column;gap:2px;min-width:0}
-.plt-split-card .plt-split-text strong{font-weight:600}
-.plt-split-card .plt-split-hint{color:rgba(232,238,247,.62);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* 转圈给一点蓝：它原来跟正文同色（近白），在放大后的卡片里显得发灰、不像「正在进行」。
+   取值与插件主色同一支（深色下偏亮的蓝，浅色下用深一档的蓝）。 */
+.plt-split-card svg{color:#8ab0f5;flex:0 0 auto}
+.plt-split-card .plt-split-text{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1 1 auto}
+.plt-split-card .plt-split-text strong{font-weight:600;letter-spacing:.1px}
+.plt-split-card .plt-split-hint{color:rgba(232,238,247,.68);font-size:13px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @keyframes plt-split-fade{from{opacity:0}to{opacity:1}}
 /* 进场关键帧必须与基础样式的 transform 用同一套居中值：
    animation 的 fill-mode 是 both，动画跑完后保留的是**关键帧里的 to**，不是基础样式 ——

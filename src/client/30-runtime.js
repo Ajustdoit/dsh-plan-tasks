@@ -43,6 +43,48 @@
     }
 
     /**
+     * 直接在浏览器侧中止当前会话正在跑的这一轮（id=208「暂停」）。
+     * 与 kickoffViaClient 对称：优先用现成的 Session 绑定，没有就 retain 一次再放掉。
+     *
+     * `session.cancel()` 的语义是「停掉当前 turn，但保留待处理的收件箱」—— 正好是我们要的
+     * 「挂起而不是清空」：plan.json 已经写进去的 startedAt / note / execute 一个字段都不会被动。
+     *
+     * @returns true 表示已请求中止；false 表示这条路不可用，调用方应回退到 Host 路由。
+     */
+    async function stopViaClient(ctx, sessionId) {
+      if (typeof sessionId !== 'string' || sessionId === '') return false
+      const sessions = ctx?.get?.('sessions')
+      if (sessions === undefined || typeof sessions.binding !== 'function') return false
+      let session = sessions.binding(sessionId)?.session
+      let owned = null
+      if (session === undefined && typeof sessions.retain === 'function') {
+        try {
+          owned = sessions.retain({ sessionId }, { source: 'controllerOperation' })
+          session = owned?.binding?.session
+        } catch {
+          owned = null
+        }
+      }
+      try {
+        if (session === undefined || typeof session.cancel !== 'function') return false
+        const result = await session.cancel()
+        if (result !== null && typeof result === 'object' && result.ok === false) {
+          const failure = result.error
+          throw new Error(failure?.message ?? '中止失败')
+        }
+        return true
+      } finally {
+        if (owned !== null) {
+          try {
+            owned.release()
+          } catch {
+            /* 释放失败不影响中止结果 */
+          }
+        }
+      }
+    }
+
+    /**
      * 调 Host 半边：同源 POST + x-requested-with。
      * options.timeoutMs 是超时预算（默认 120s）：到点 abort 并抛 code='timeout' 的错误，
      * 让调用方一定收到一个结局，不会因为请求悬着而把遮罩/转圈永远留在界面上。
@@ -90,9 +132,9 @@
       const items = Array.isArray(data.items) ? data.items : []
       const parts = items.map(
         (it) =>
-          `${it.id}|${it.order}|${it.execute === true ? 1 : 0}|${it.review === true ? 1 : 0}|${it.draft === true ? 1 : 0}|${it.startedAt ?? ''}|${it.noteLen ?? ''}|${it.planLen ?? ''}|${it.time ?? 0}|${it.name ?? ''}`,
+          `${it.id}|${it.order}|${it.execute === true ? 1 : 0}|${it.review === true ? 1 : 0}|${it.draft === true ? 1 : 0}|${it.failed === true ? 1 : 0}|${it.startedAt ?? ''}|${it.noteLen ?? ''}|${it.planLen ?? ''}|${it.time ?? 0}|${it.name ?? ''}`,
       )
-      return `${data.planExists === true ? 1 : 0}|${data.broken === true ? 1 : 0}|s${data.settings?.reviewedLimit ?? ''}|${parts.join(';')}`
+      return `${data.planExists === true ? 1 : 0}|${data.broken === true ? 1 : 0}|s${data.settings?.noteLimit ?? ''}|${parts.join(';')}`
     }
 
     function fmtTime(ms) {
@@ -127,6 +169,20 @@
       return rm === 0 ? `${hh}小时` : `${hh}小时${rm}分钟`
     }
 
+    /**
+     * 裁剪之后追在提示后面的「已备份」尾巴（id=257）。
+     *
+     * 宿主只有在真备份成功时才回 `backup`，所以这里不做任何猜测：
+     * 有就报一句，没有就当没这回事。提示文案统一由这一个函数生成，
+     * 免得「改上限」和「审核通过」两条路写出两种说法。
+     */
+    function backupSuffix(data) {
+      const backup = data?.backup
+      if (backup === null || backup === undefined) return ''
+      const name = typeof backup.path === 'string' && backup.path !== '' ? backup.path.split(/[\\/]/).pop() : ''
+      return name === '' ? ' · 已备份完整 JSON' : ` · 已备份到 ${name}`
+    }
+
     function fmtDate(iso) {
       if (typeof iso !== 'string' || iso === '') return ''
       const t = Date.parse(iso)
@@ -149,6 +205,13 @@
           ? { key: 'reviewed', label: '已审核' }
           : { key: 'unreviewed', label: '待审核' }
       }
+      // id=233：「已中断」必须排在 running 之前。中断后 startedAt 是故意保留的
+      // （它是「继续 = 续做而不是重跑」的依据），若仍按 startedAt 判 running，
+      // 被中断的条目会一直显示「执行中」、上方按钮一直显示「干活中」——
+      // 这正是用户报的那个 bug。落盘的 interrupted 才是这一档的真源，内存态不参与。
+      // 失败的条目留在待执行组里，但不再显示成「执行中」，模型也不会再选它。
+      if (item.failed === true) return { key: 'failed', label: '失败' }
+      if (item.interrupted === true) return { key: 'interrupted', label: '已中断' }
       if (typeof item.startedAt === 'string' && item.startedAt !== '') return { key: 'running', label: '执行中' }
       // 模型刚开始干活、还没来得及把 startedAt 写进 plan.json 的这一小段：
       // 会话已经是 running 了，就把排在最前面的那条待执行按「执行中」显示，
@@ -157,24 +220,60 @@
       return { key: 'todo', label: '待执行' }
     }
 
-    /** 任务类型 → 提交时自动加在提示词前面的前缀。 */
+    /**
+     * 任务类型 → 提交时自动加在提示词前面的前缀。
+     *
+     * `目标` 以前也会拼一个 `/目标 `，id=217 定位时发现那是个雷：harness 的
+     * slash 命令把「目标」注册成了 `/goal` 的中文别名（`dsh-client-ui-commands`
+     * 的 `token.goal`），这段文字一旦被人粘进左侧输入框，整条任务就会被当成
+     * `/goal` 的 objective 参数吞掉，根本到不了模型。真正的目标模式改由
+     * `mode` 字段承载（宿主 `modeForTaskType`），前缀不再需要。
+     */
     function typePrefix(type) {
       if (type === '仅回答') return '仅回答：'
-      if (type === '目标') return '/目标 '
       return ''
+    }
+
+    /**
+     * 深入模板的识别句。正文里已经含这一句，就说明它已经包过一层（id=262 幂等）：
+     * 用户把改好的提示词再粘回来、或者撤回了又重新发送，都不该再套第二层。
+     * 它同时是「深入模式生效过」的落盘证据，比另存一个 boolean 更耐改。
+     */
+    const DEEP_MARK = '我想让这项任务做得更深入'
+
+    /**
+     * 多行原文包成 Markdown 引用块（id=262）。
+     *
+     * 之前原文直接拼在「当前任务：」后面，第二行以下顶格混进正文，模型读不出
+     * 哪几行是用户原话、哪几行是我们加的模板。引用块是最省字、模型又最认的边界标记：
+     * 每行一个 `> `，空行留一个裸 `>`，多段原文也不会被压成一段。
+     */
+    function quoteLines(text) {
+      return String(text ?? '')
+        .split('\n')
+        .map((line) => (line.trim() === '' ? '>' : `> ${line}`))
+        .join('\n')
     }
 
     /**
      * 深入模式：把用户随手写的一行任务改写成一段「要求做深、不许做大」的提示词。
      * 原文放在最上面（模型第一眼要看到用户到底要什么），后面追加四问 + 重写要求。
-     * 换行用 \n 拼接，避免缩进把多行模板带歪。
+     *
+     * id=262 的三处修正：
+     * 1. 幂等：已含 {@link DEEP_MARK} 就原样返回，重复粘贴不会得到「当前任务：当前任务：…」；
+     * 2. CRLF 归一：`\r\n` 先收成 `\n`，否则模板里会夹着孤立的 `\r`，模型侧常被读成空行；
+     * 3. 原文包引用块，多行原文不再顶格混进模板正文。
      */
     function deepPrompt(task) {
-      const body = String(task ?? '').trim()
+      const body = String(task ?? '')
+        .replace(/\r\n?/g, '\n')
+        .trim()
+      if (body.includes(DEEP_MARK)) return body
       return [
-        `当前任务：${body}`,
+        '当前任务原文如下（引用块里是我的原话，可能有多行）：',
+        body === '' ? '> （空）' : quoteLines(body),
         '',
-        '我想让这项任务做得更深入，而不是把规模做得更大。在重写任务之前，请先：',
+        DEEP_MARK + '，而不是把规模做得更大。在重写任务之前，请先：',
         '1. 说明这个领域的顶尖专业人士在这里会做哪些我没有要求的事',
         '2. 指出他们会从哪些最原始的材料入手，而不是从已经替我加工整理过的信息入手',
         '3. 列出他们会使用的具体方法和工具',
@@ -182,6 +281,28 @@
         '',
         '然后重写我的提示词，明确要求完成上述这些事。',
       ].join('\n')
+    }
+
+    /**
+     * 提交时拼出最终写进 plan 的那段提示词（id=262）。
+     *
+     * 三种模式的优先级与叠加规则收在这一个函数里，别处不再各拼各的：
+     * - 草稿：一律存用户原话（改写了就不是草稿了，转正/再编辑时再决定）；
+     * - 仅回答：前缀单独占一行（`仅回答：\n<正文>`）——以前是 `仅回答：当前任务：…`
+     *   直接贴在一起，两个标签连成一串谁也读不懂；
+     * - 深入：先过 {@link deepPrompt}（自带幂等与 CRLF 归一），再叠前缀。
+     *
+     * 前缀先剥后加，保证「一条提示词里最多一个前缀」：用户自己写着「仅回答：」
+     * 又选了仅回答类型时，不会变成两个。
+     */
+    function composePrompt(options) {
+      const body = String(options?.text ?? '')
+      if (options?.draft === true) return body.trim()
+      const prefix = typePrefix(options?.taskType)
+      const raw = options?.deep === true ? deepPrompt(body) : body.replace(/\r\n?/g, '\n')
+      if (prefix === '') return raw
+      const bare = raw.trimStart().startsWith(prefix) ? raw.trimStart().slice(prefix.length).trimStart() : raw.trimStart()
+      return `${prefix}\n${bare}`
     }
 
     function InitDialog(props) {

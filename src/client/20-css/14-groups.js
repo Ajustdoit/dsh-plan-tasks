@@ -41,7 +41,33 @@
 .plt-group-todo .plt-item.running::after{content:'';position:absolute;inset:0;pointer-events:none;border-radius:inherit;box-shadow:inset 0 0 22px -8px rgba(236,72,153,.4),inset 0 0 0 1px rgba(236,72,153,.12);background:linear-gradient(100deg,transparent 20%,rgba(255,214,232,.07) 45%,rgba(255,255,255,.12) 50%,rgba(255,214,232,.07) 55%,transparent 80%);background-size:220% 100%;background-repeat:no-repeat;animation:plt-sheen 3.2s ease-in-out infinite}
 @keyframes plt-sheen{0%{background-position:180% 0}100%{background-position:-80% 0}}
 @media (prefers-reduced-motion: reduce){.plt-group-todo .plt-item.running::after{animation:none;background:none;box-shadow:inset 0 0 22px -8px rgba(236,72,153,.4)}}
+/* id=239：组收起、但组里还有条目在跑 —— 卡片整个不在 DOM 里（收起时只渲染组头），
+   上面那条卡片流光自然也跟着消失。这里让容器自己的边框走一道光，收起也能看见「还在干」。
+   挂在 .plt-group 而不是 .plt-group-h：组头有 backdrop-filter 与 z-index:3 自成层叠上下文，
+   光往外扩会被裁掉，而且会跟 hover 的 ::before 左竖条抢伪元素。
+   边框流光用 padding + mask 挖空中间，只留 1px 环，避免在容器里铺一层色块压住内容。 */
+.plt-group.is-running:not(.open){position:relative;border-color:rgba(var(--plt-accent),.55);box-shadow:0 1px 2px rgba(0,0,0,.1),0 6px 16px -10px rgba(0,0,0,.4),0 0 18px -6px rgba(var(--plt-accent),.5)}
+.plt-group.is-running:not(.open)::after{content:'';position:absolute;inset:0;pointer-events:none;border-radius:inherit;padding:1px;background:linear-gradient(100deg,transparent 18%,rgba(var(--plt-accent),.18) 34%,rgba(var(--plt-accent),.95) 48%,rgba(255,255,255,.9) 52%,rgba(var(--plt-accent),.95) 56%,rgba(var(--plt-accent),.18) 70%,transparent 86%);background-size:240% 100%;background-repeat:no-repeat;-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude;animation:plt-group-sheen 3.2s linear infinite}
+@keyframes plt-group-sheen{0%{background-position:200% 0}100%{background-position:-60% 0}}
+/* 减弱动画时不留一条乱跑的亮边：换成稳态描边，仍在告诉用户「这组在干活」。 */
+@media (prefers-reduced-motion: reduce){.plt-group.is-running:not(.open)::after{animation:none;background:linear-gradient(180deg,rgba(var(--plt-accent),.85),rgba(var(--plt-accent),.3));background-size:100% 100%}}
 .plt-group-todo .plt-group-count{background:rgba(236,72,153,.14);color:#f0a6c6;border-color:rgba(236,72,153,.3)}
+/* id=240：组收起时的「正在执行」提示。跟计数胶囊并排，但形状是纯文字 + 转圈，
+   比胶囊更轻 —— 它说的是「还在动」，不是「有几条」。
+   字号比 .plt-group-count 小 0.5px（与 .plt-limit 同款递减），三个控件并排时不抢。
+   flex:0 0 auto + nowrap：组头高度固定 38px，提示绝不能被压成两行。
+   max-width 与 ellipsis 是兜底：320px 侧栏下如果真放不下，宁可截断也不要挤掉组名。 */
+.plt-group-run{flex:0 0 auto;display:inline-flex;align-items:center;gap:4px;max-width:92px;overflow:hidden;font-size:12px;line-height:18px;font-weight:500;letter-spacing:.01em;white-space:nowrap;text-overflow:ellipsis;color:rgba(var(--plt-accent),.95)}
+/* 深数组的 accent 里有粉红(236,72,153)与琥珀(255,180,60)，直接当 12px 小字用只有 3.1~4.4:1，
+   在深底上偏暗。往白里调 45% 保住色相、把亮度提上来；浅色那条覆盖会把它整条压回深色值。 */
+@supports (color: color-mix(in srgb, red 50%, white)){
+  .plt-group-run{color:color-mix(in srgb,rgb(var(--plt-accent)) 55%,#ffffff)}
+}
+.plt-group-run svg{flex:0 0 auto}
+.plt-group-run-txt{overflow:hidden;text-overflow:ellipsis}
+/* 组头本来就窄：320px 以下把「正在执行」缩成只有转圈，靠 title/aria-label 说明。
+   必须用 @container —— @media 量的是视口，侧栏拖窄时窗口还是宽的。 */
+@container (max-width:360px){.plt-group-run{max-width:20px;gap:0}.plt-group-run-txt{display:none}}
 
 /* —— 二级内容统一：同一套内边距、分隔线、标题与代码块基调 —— */
 .plt-group-body .plt-body{padding:6px 12px 13px 22px;margin-top:4px;border-top:1px solid rgba(var(--plt-accent),.14)}

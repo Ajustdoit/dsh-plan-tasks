@@ -15,6 +15,11 @@
 .plt-name{flex:1 1 auto;min-width:0;overflow:hidden;font-size:14.5px;letter-spacing:.005em;line-height:1.3;white-space:nowrap;text-overflow:ellipsis;padding-right:5px}
 .plt-tag{flex:0 0 auto;font-size:14px;padding:0 7px;border-radius:999px;line-height:20px;border:1px solid transparent;white-space:nowrap}
 .plt-tag.running{display:inline-flex;align-items:center;gap:4px;background:rgba(236,72,153,.16);color:#f472b6;border-color:rgba(236,72,153,.38)}
+/* id=233「已中断」：琥珀告警色，和青色的「执行中」明确分开 —— 两个状态都发生在
+   「还没完成」的条目上，只靠深浅区分会看错。不带转圈图标：它没有在跑，不能再假装活着。 */
+.plt-tag.interrupted{background:rgba(255,180,60,.16);color:#f0b455;border-color:rgba(255,180,60,.44)}
+/* 执行失败：模型已跳过。留在待执行组里，颜色和「执行中」分开，避免看起来还在跑。 */
+.plt-tag.failed{background:rgba(220,80,70,.16);color:#f0a8a2;border-color:rgba(220,80,70,.42)}
 /* 执行中：转圈图标匀速旋转，作为「还在跑」的活信号（减少动态偏好下停转）。 */
 .plt-spin{animation:plt-spin .9s linear infinite;transform-origin:50% 50%}
 @keyframes plt-spin{to{transform:rotate(360deg)}}
