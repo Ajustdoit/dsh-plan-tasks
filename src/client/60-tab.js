@@ -103,15 +103,19 @@
       // pausedByUserRef —— 这一轮是用户自己点暂停停的（暂停路径已经写过 interrupted，别再覆盖提示）；
       // wasRunningRef  —— 上一帧的会话 running，用来捕捉「true → false」这个唯一可得的中断信号；
       // reconcilingRef —— 对账请求在飞，别叠第二次。
+      // id=352-E：初值必须是 null（**未知**），不能是 false。
+      // 用 false 的话，页面刷新后第一次观测到的 running 已经是 false，
+      // `was !== true` 直接 return —— 对账那次永远不跑，孤儿 startedAt 就再也救不回来。
+      // 现在 null 表示「还没观测过」，第一次观测无条件对账一次。
       const pausedByUserRef = React.useRef(false)
-      const wasRunningRef = React.useRef(false)
+      const wasRunningRef = React.useRef(null)
       const reconcilingRef = React.useRef(false)
+      // id=341：这一轮结束后是否已经派过下一条。会话 running 会抖（工具调用之间也算空闲），
+      // 没有这个标记就会在同一个空档里连派几条。
+      const dispatchedRef = React.useRef(false)
       // 已挂起（id=208）：只存内存，不写 plan.json。页面刷新后按「有未完成且无 turn 在跑」
       // 自然回落为「未开始」，不需要一个跨会话会失效的持久状态字段。
       const [paused, setPaused] = React.useState(false)
-      // 重启中：整个面板盖一层，等宿主把新进程拉起来后自动刷新页面。
-      const [restarting, setRestarting] = React.useState(false)
-      const [restartTip, setRestartTip] = React.useState('')
       // 上一次列表数据的指纹，用来跳过「内容没变」的重渲染。
       const lastSignatureRef = React.useRef('')
       // 展开中的条目的正文 / 备注：列表只拿 lite 数据，展开时才按需取全文。
@@ -334,8 +338,10 @@
         startingRef.current = false
         pausingRef.current = false
         pausedByUserRef.current = false
-        wasRunningRef.current = false
+        // 换会话 = 重新观测，回到「未知」。
+        wasRunningRef.current = null
         reconcilingRef.current = false
+        dispatchedRef.current = false
         setStarting(false)
         setPausing(false)
         setPaused(false)
@@ -365,7 +371,17 @@
       // 旧实现用「倒计时归零」来触发刷新，setInterval 抖动时 left 会停在 1 不归零，
       // 于是界面卡在 1s、实际不再刷新（执行中把间隔压到 1s 时尤其明显）。
       // 现在每次 tick 直接比较 Date.now() 与 deadline，到点就刷新，与倒计时显示解耦。
-      // 有任务正在执行（execute 为 false 且已写 startedAt）时用更短的间隔，尽量跟模型进度同步。
+      //
+      // 【维护须知（id=283：这个功能不许顺手删）】
+      // 面板自己不产生计划状态 —— 模型用 `.plan/q.mjs` 改 plan.json，宿主把结果写盘，
+      // 页签要看见就必须有人去读。谁在读：
+      //   1. 这里：auto 打开时每 5 秒静默 `sync()` 一次，是**唯一**的周期性读盘；
+      //   2. 用户手点「刷新」；
+      //   3. 切回前台 / 窗口聚焦 / pageshow / 会话由空闲翻成执行中各补一次（下方三个 effect），
+      //      但都只补**一次**，不是周期。
+      // 所以删掉这段 = 模型干完活面板不动，用户得自己一直点刷新。要改只能改间隔或
+      // 触发方式，不能用「看起来没人用」为理由整段移除。
+      // 关闭 auto 时（用户点顶栏那个按钮）定时器清掉、倒计时显示 0 —— 那是用户显式选择手动刷新。
       React.useEffect(() => {
         if (!auto || !visible) {
           if (!auto) setTick(0)
@@ -460,7 +476,12 @@
         const it = (state.data?.items ?? []).find((x) => x.id === openId)
         if (it === undefined) return ''
         const srcLen = Number(it.sourcePromptLen ?? 0) || (typeof it.sourcePrompt === 'string' ? it.sourcePrompt.length : 0)
-        return `${it.id}:${it.planLen ?? 0}:${it.noteLen ?? 0}:${it.time ?? 0}:${srcLen}`
+        // id=273：父节点的正文恒为空，只看它自己的指纹就永远不变 —— 子任务做完、
+        // 审核通过都不会触发重新取详情，展开区就停在旧数据上。children 的子指纹一并算进去。
+        const kids = Array.isArray(it.children)
+          ? it.children.map((c) => `${c.id}:${c.execute === true ? 1 : 0}${c.review === true ? 1 : 0}:${c.noteLen ?? 0}:${c.time ?? 0}`).join(',')
+          : ''
+        return `${it.id}:${it.planLen ?? 0}:${it.noteLen ?? 0}:${it.time ?? 0}:${srcLen}:${kids}`
       })()
       React.useEffect(() => {
         if (openId === null) {
@@ -591,57 +612,6 @@
         } finally {
           setSplitting(false)
         }
-      }
-
-      /**
-       * 真正重启 dsh web。
-       * 宿主那边的 restart 会先回包、再 spawn 一个游离 launcher、然后自己退出；
-       * 这里随后就不停探活，新进程一上线就刷新页面（cookie 由持久密钥签名，重启后仍有效）。
-       */
-      const doRestart = async () => {
-        if (restarting) return
-        setRestarting(true)
-        setRestartTip('正在请求重启…')
-        try {
-          await call('restart', { ...payload })
-        } catch (error) {
-          // 连接在宿主退出瞬间被掐断是正常的：请求可能已经生效，继续探活。
-          const message = error instanceof Error ? error.message : String(error)
-          if (!/fetch|network|abort|terminated|socket/i.test(message)) {
-            setRestarting(false)
-            setState((prev) => ({ ...prev, error: `重启失败：${message}` }))
-            return
-          }
-        }
-        setRestartTip('服务正在重启，等待新进程上线…')
-        const deadline = Date.now() + 90_000
-        let tries = 0
-        const tickOnce = async () => {
-          if (Date.now() > deadline) {
-            setRestarting(false)
-            setState((prev) => ({ ...prev, error: '服务没有在 90 秒内重新上线，请手动重启 dsh web' }))
-            return
-          }
-          tries += 1
-          try {
-            const res = await fetch(`${API_BASE}read`, {
-              method: 'POST',
-              headers: { 'content-type': 'application/json', 'x-requested-with': 'XMLHttpRequest' },
-              body: JSON.stringify({ ...payload, lite: true }),
-            })
-            const body = await res.json()
-            if (body?.ok === true) {
-              setRestartTip('已就绪，正在刷新页面…')
-              window.location.reload()
-              return
-            }
-          } catch {
-            /* 还没起来，继续等 */
-          }
-          window.setTimeout(tickOnce, 1000)
-        }
-        // 先等一下再开始探活，否则探到的还是正要退出的旧进程。
-        window.setTimeout(tickOnce, 1500)
       }
 
       /**
@@ -798,7 +768,14 @@
       React.useEffect(() => {
         const was = wasRunningRef.current
         wasRunningRef.current = agentRunning === true
-        if (was !== true || agentRunning === true) return undefined
+        // id=352-E：两处放宽。
+        //   1. 首次观测（was === null）也做一次对账 —— 页面刷新后就是这个时机，
+        //      不然刷新一次孤儿就再也救不回来（旧逻辑要求 was === true）。
+        //   2. 真正的中断跳变（was === true → 现在 false）照旧。
+        // 正在跑的时候当然不做（agentRunning === true 直接退出）。
+        const firstLook = was === null
+        if (agentRunning === true) return undefined
+        if (firstLook !== true && was !== true) return undefined
         if (pausedByUserRef.current === true || reconcilingRef.current === true) return undefined
         reconcilingRef.current = true
         let cancelled = false
@@ -807,17 +784,24 @@
             try {
               const data = await call('read', { ...payload, lite: true })
               if (cancelled || data === null || typeof data !== 'object') return
+              // id=352-E：加 2 分钟宽限。刚被派出去的那条此刻正好「有 startedAt、没产出」，
+              // 立刻判成中断会把正常在跑的任务打成孤儿 —— 首次观测（刷新页面）时尤其容易。
+              // 真孤儿在宿主侧 30 分钟就被 read 回收了，这里 2 分钟只是兜住「宿主那份没跑到」。
+              const cutoff = Date.now() - ORPHAN_CLIENT_GRACE_MS
               const losers = (data.items ?? []).filter(
                 (it) =>
                   it.execute !== true
                   && it.draft !== true
                   && it.interrupted !== true
                   && typeof it.startedAt === 'string'
-                  && it.startedAt !== '',
+                  && it.startedAt !== ''
+                  && Number.isFinite(Date.parse(it.startedAt))
+                  && Date.parse(it.startedAt) < cutoff,
               )
               if (losers.length === 0) return
               const done = await markInterrupted(losers.map((it) => it.id))
-              if (done > 0) setNotice(`执行已中断（${done} 条）`, NOTICE_LONG_MS)
+              // 首次观测（刷新页面）时静默修复：它不是「刚刚中断」，弹提示只会让用户困惑。
+              if (done > 0 && firstLook !== true) setNotice(`执行已中断（${done} 条）`, NOTICE_LONG_MS)
             } catch {
               // 对账失败不弹错：下一次 running 翻下去还会再来一次，别用噪音打搅用户。
             } finally {
@@ -829,6 +813,67 @@
           cancelled = true
           window.clearTimeout(timer)
           reconcilingRef.current = false
+        }
+      }, [agentRunning, sessionId, cwd])
+
+      /**
+       * id=341：一个 turn 结束（running: true → false）就派发下一条任务。
+       *
+       * 这就是需求里的「先回答、再触发下一任务」：模型的回答已经写完了（turn 结束），
+       * 我们才把下一条作为新的用户消息发进去。谁来做下一条由宿主算（queue-cli 的 nextTask），
+       * 不再让模型自己扫待办 —— 技能正文里那条「做完立刻 start 下一条」已经删掉。
+       *
+       * 几种不该派的情况：
+       * - 用户主动暂停（pausedByUserRef）：他要的就是停下来看看；
+       * - 正在中断对账（reconcilingRef）：先把中断状态写干净，否则会派到「刚被标中断」的那条；
+       * - 这一轮已经派过（dispatchedRef）：running 会抖，别连派；
+       * - 队列空了：dispatch 自己会返回 empty，这里不提示也不报错。
+       *
+       * 失败只记一条提示，不弹错误弹窗：派发失败最多是「停在原地」，用户再点一次开始即可，
+       * 不该盖掉屏幕上更重要的内容。
+       */
+      React.useEffect(() => {
+        const was = wasRunningRef.current
+        wasRunningRef.current = agentRunning === true
+        if (agentRunning === true) {
+          // 新一轮开跑：允许它结束后再派一次。
+          dispatchedRef.current = false
+          return undefined
+        }
+        if (was !== true) return undefined
+        if (pausedByUserRef.current === true || reconcilingRef.current === true) return undefined
+        if (dispatchedRef.current === true) return undefined
+        dispatchedRef.current = true
+        let cancelled = false
+        const timer = window.setTimeout(() => {
+          void (async () => {
+            try {
+              // 先等中断对账落盘（它比派发早一个 effect，但请求是并发的）。
+              const data = await call('dispatch', { ...payload })
+              if (cancelled || data === null || typeof data !== 'object') return
+              if (data.dispatched !== true) {
+                if (data.reason === 'empty') {
+                  // id=343：正常收工。把这一轮留下的运行态一起收掉，否则顶栏会停在
+                  // 「干活中 / 继续」上，而队列其实已经空了 —— 用户只能靠刷新页面摆脱它。
+                  setPaused(false)
+                  pausedByUserRef.current = false
+                  setNotice(data.finished === true ? '待办已清空，本轮执行结束' : '本轮执行结束', NOTICE_LONG_MS)
+                  void sync()
+                }
+                return
+              }
+              // 重投（同一组整轮投完之后回到第一条）要说明白，否则看起来像重复发送。
+              setNotice(data.redelivered === true ? `重新派发：${data.taskId}` : `已派发下一条：${data.taskId}`, NOTICE_MS)
+              // 派出去之后立刻读一次，让新条目的「执行中」状态尽快出现。
+              void sync()
+            } catch (error) {
+              setNotice(`派发下一条失败：${error instanceof Error ? error.message : String(error)}`, NOTICE_LONG_MS)
+            }
+          })()
+        }, DISPATCH_SETTLE_MS)
+        return () => {
+          cancelled = true
+          window.clearTimeout(timer)
         }
       }, [agentRunning, sessionId, cwd])
 
@@ -1155,6 +1200,27 @@
         })
       }
 
+      /**
+       * 「待审核自动通过条数」下拉的 change（id=300）。
+       *
+       * 与保留条数同款：写回 → 宿主立刻按新阈值补一轮自动通过 + 归档 → 重读。
+       * `autoApproved` 是这次真被通过掉的 id（宿主回传），有就报一句，
+       * 免得用户看到待审核凭空少了几条却不知道为什么。
+       */
+      const changeAutoReviewLimit = async (value) => {
+        const next = Number(value)
+        await run(async () => {
+          const saved = await call('settings', { ...payload, patch: { autoReviewLimit: next } })
+          const passed = Array.isArray(saved?.autoApproved) ? saved.autoApproved.length : 0
+          setNotice(
+            passed > 0
+              ? `待审核超过 ${next} 条后自动通过 · 本次自动通过 ${passed} 条`
+              : `待审核自动通过：超过 ${next} 条时通过最旧的一条`,
+          )
+          return call('read', { ...payload, lite: true })
+        })
+      }
+
       React.useEffect(() => {
         if (notice === '') return undefined
         const timer = setTimeout(() => setNoticeState(''), noticeMsRef.current)
@@ -1205,7 +1271,7 @@
           ),
           // 开始 / 暂停（id=207 渲染，id=208 接逻辑）：插在「自动刷新」与「刷新」之间，
           // 即口语需求说的「任务列表右边、倒计时左边」。两个按钮都沿用 .plt-btn 的标签结构
-          // （inline-flex + 图标 + 文字），与刷新/重启按钮视觉同族。
+          // （inline-flex + 图标 + 文字），与刷新按钮视觉同族。
           // 可用性全部由 canStart / canPause 推导（见上方 working 一带），不在别处另存状态：
           //   未开始 → 开始可点、暂停禁用；执行中 → 反过来；已挂起 → 开始变「继续」、暂停禁用；
           //   全部完成（无待办）→ 两个都禁用；busy（有请求在飞）→ 两个都禁用。
@@ -1262,21 +1328,6 @@
             ),
             h('span', { className: 'plt-refresh-label' }, '刷新'),
           ),
-          // 重启：改了宿主代码（lib/index.js）后必须整进程重开才生效，这里一键做完。
-          h(
-            'button',
-            {
-              className: 'plt-btn plt-restart',
-              disabled: busy || restarting,
-              'data-tip': '重启 dsh web（改过宿主代码后用），完成后页面会自动刷新',
-              onClick: (e) => {
-                e.stopPropagation()
-                void doRestart()
-              },
-            },
-            restarting ? h(SpinnerIcon, { size: 12 }) : null,
-            h('span', null, restarting ? '重启中' : '重启'),
-          ),
         ),
         state.error !== '' ? h('div', { className: 'plt-err' }, state.error) : null,
         h(
@@ -1294,11 +1345,58 @@
                       // 组顺序（从上到下）：已审核最上 → 待审核 → 待执行最下。
                       // 越靠下越接近底部输入框，写完就能直接提交，符合「干完的往上沉」的阅读习惯。
                       // 只有待执行组可拖拽排序；「已审核」组内部按倒序展示（最近完成的在最上）。
-                      const doneReviewed = items.filter((it) => it.execute === true && it.review === true && it.draft !== true).slice().reverse()
-                      const donePending = items.filter((it) => it.execute === true && it.review !== true && it.draft !== true)
+                      // id=273：父节点（拆解批次）的状态由 children 决定 —— 它自己的
+                      // execute / draft 只是容器标记，整批都做完之前不该沉到「已审核」，
+                      // 所以分组看的是「这一批里还剩几条没做完」，与宿主队列口径一致。
+                      const batchOf = (it) => {
+                        const kids = Array.isArray(it.children) ? it.children : []
+                        if (kids.length === 0) return null
+                        return {
+                          allDone: kids.every((c) => c.execute === true),
+                          allReviewed: kids.every((c) => c.execute === true && c.review === true),
+                        }
+                      }
+                      // id=338：已审核组固定「完成时间倒序」——最近审核通过的在最上。
+                      // 以前是「上游怎么给就整个 reverse 一遍」：来源是
+                      // [归档(新→旧), plan.json(按 order)]，reverse 之后两段各自反向，
+                      // 刚通过的一条反而沉到下面去了。改成按 finishedAt 显式排序，
+                      // 与来源顺序解耦；老条目缺 finishedAt 时退到 createdAt、再退到 id。
+                      // 拆解批次用 children 里最晚的完成时间（整批审完的那一刻才算完成）。
+                      const reviewedTimeOf = (it) => {
+                        const kids = Array.isArray(it.children) ? it.children : []
+                        const pool = kids.length > 0 ? kids : [it]
+                        const times = pool.map((one) => {
+                          const done = typeof one?.finishedAt === 'string' ? Date.parse(one.finishedAt) : NaN
+                          if (Number.isFinite(done)) return done
+                          const born = typeof one?.createdAt === 'string' ? Date.parse(one.createdAt) : NaN
+                          return Number.isFinite(born) ? born : 0
+                        })
+                        return times.length === 0 ? 0 : Math.max(...times)
+                      }
+                      const reviewedRank = (it) => {
+                        const head = Number(String(it?.id ?? '').split('-')[0])
+                        return Number.isFinite(head) ? head : 0
+                      }
+                      const doneReviewed = items
+                        .filter((it) => {
+                          const batch = batchOf(it)
+                          if (batch !== null) return batch.allReviewed && it.draft !== true
+                          return it.execute === true && it.review === true && it.draft !== true
+                        })
+                        .sort((a, b) => reviewedTimeOf(b) - reviewedTimeOf(a) || reviewedRank(b) - reviewedRank(a))
+                      const donePending = items.filter((it) => {
+                        const batch = batchOf(it)
+                        if (batch !== null) return batch.allDone && batch.allReviewed !== true && it.draft !== true
+                        return it.execute === true && it.review !== true && it.draft !== true
+                      })
                       // 草稿单独成组（绿色、最靠下、贴着输入框）；没有草稿时整组不显示。
                       const draftList = items.filter((it) => it.draft === true)
-                      const todoList = items.filter((it) => it.execute !== true && it.draft !== true)
+                      const todoList = items.filter((it) => {
+                        if (it.draft === true) return false
+                        const batch = batchOf(it)
+                        if (batch !== null) return batch.allDone !== true
+                        return it.execute !== true
+                      })
                       const groups = [
                         { key: 'reviewed', title: '已审核', list: doneReviewed, defaultOpen: false, drag: false, alwaysShow: false, emptyText: '还没有审核通过的计划' },
                         { key: 'unreviewed', title: '待审核', list: donePending, defaultOpen: false, drag: false, alwaysShow: true, emptyText: '暂无待审核内容' },
@@ -1335,9 +1433,12 @@
                           canPin: groupKey === 'todo' && (item.decomposeKey ?? '') === '',
                           onPinTop: () => void pinTop(item.id),
                           // 草稿组专属：单条「转为待执行」+ 正文可直接编辑。
+                          // 草稿组里的父节点给「转为待执行」：整批一起出草稿（宿主按 id 改父）。
                           onPromote: () => void moveToGroup([item.id], false),
                           // 待执行里还没开工的才允许退回草稿（执行中不给）。
-                          canDemote: groupKey === 'todo' && statusOf(item, impliedRunningId === item.id).key === 'todo',
+                          // 父节点（拆解批次）不给「转为草稿」：它的草稿态是整批的落点，
+                          // 单条父退回草稿要连带处理 children，宿主没有这个语义（id=273）。
+                          canDemote: groupKey === 'todo' && statusOf(item, impliedRunningId === item.id).key === 'todo' && !(Array.isArray(item.children) && item.children.length > 0),
                           onDemote: () => void moveToGroup([item.id], true),
                           editable: groupKey === 'draft',
                           // 会话在跑但这条还没写 startedAt：先按「执行中」显示。
@@ -1375,7 +1476,12 @@
                           },
                           onToggle: () => toggleItem(item.id),
                           onFetchDetail: fetchDetail,
-                          onPatch: (value) => patch(item.id, value),
+                          // id=273：父节点展开后是子任务列表，每行一个「通过」——
+                          // 子任务不在顶层 openId 体系里，patch 的 id 由行内自己给。
+                          // 顶层卡片的调用仍然只传值（不传 id）。
+                          // id=325：子任务 id 现在是 "100-A" 这种字符串，只判 typeof number
+                          // 会把它当成 patch 对象，于是「通过」实际打到了父上（子任务没变）。
+                          onPatch: (a, b) => (typeof a === 'number' || typeof a === 'string' ? patch(a, b) : patch(item.id, a)),
                           onRemove: () => remove(item.id),
                         })
                       }
@@ -1408,7 +1514,9 @@
                               },
                               h('span', { className: 'plt-caret' }, h(CaretIcon, { size: 13 })),
                               h('span', { className: 'plt-group-name' }, group.title),
-                              h('span', { className: 'plt-group-count' }, String(group.list.length)),
+                              // id=337：条数统计挪到组头最右端（所有控件之后），
+                              // 读数固定补足三位（001 / 012 / 123）—— 组与组之间同一位置、
+                              // 同一宽度，展开收起时右边界不会跟着数字位数来回跳。
                               // id=240：组收起、里面还有条目在跑时，给一句看得见的提示。
                               // 展开态不显示 —— 那时卡片自己的「执行中」标签就在眼前，再说一遍是噪音。
                               // 文字 + 转圈都放进去：侧栏很窄时 aria/title 是读屏与悬停的兜底。
@@ -1465,6 +1573,31 @@
                                     h('span', { className: 'plt-backup-txt' }, '备份'),
                                   )
                                 : null,
+                              // 「待审核超过 N 条自动通过最旧一条」的条数（id=300）。
+                              // 位置就在「待审核」组头里，与已审核那个下拉同款：档位同样由
+                              // 宿主下发的 noteLimits 决定（用户要求「选项与已审核一致」），
+                              // 值也只认磁盘真值，不在本地存副本。
+                              group.key === 'unreviewed' && Array.isArray(state.data?.noteLimits)
+                                ? h(
+                                    'select',
+                                    {
+                                      className: 'plt-limit',
+                                      value: String(state.data?.settings?.autoReviewLimit ?? 200),
+                                      disabled: busy,
+                                      'aria-label': '待审核自动通过的条数',
+                                      'data-tip': '待审核超过这个条数时，自动通过最旧的一条；档位与「已审核」的保留条数一致',
+                                      onClick: (e) => e.stopPropagation(),
+                                      onChange: (e) => void changeAutoReviewLimit(e.target.value),
+                                    },
+                                    state.data.noteLimits.map((n) =>
+                                      h('option', { key: String(n), value: String(n) }, String(n)),
+                                    ),
+                                  )
+                                : null,
+                              // id=337：条数统计压在所有控件之后（最右端），补足三位。
+                              // 放最后而不是紧跟组名：下拉 / 提示 / 备份开关的长短各不相同，
+                              // 数字挂在组名后面时每一组的位置都不一样，扫视时对不齐。
+                              h('span', { className: 'plt-group-count' }, padCount(group.list.length)),
                             ),
                             isOpen
                               ? group.list.length > 0
@@ -1827,19 +1960,6 @@
                   h('strong', null, '正在拆解…'),
                   h('span', { className: 'plt-split-hint' }, draftMode ? '产物将落在草稿组' : '产物将落在待执行组'),
                 ),
-              ),
-            )
-          : null,
-        // 重启罩层：盖住整个面板，防止用户在重启过程中继续点按钮。
-        restarting
-          ? h(
-              'div',
-              { className: 'plt-mask' },
-              h(
-                'div',
-                { className: 'plt-dialog', onClick: (e) => e.stopPropagation() },
-                h('h3', null, '正在重启 dsh web'),
-                h('p', null, restartTip, h('br'), h('span', { className: 'plt-restart-tip' }, '宿主代码改动需要整进程重开才生效，页面会在服务就绪后自动刷新。')),
               ),
             )
           : null,

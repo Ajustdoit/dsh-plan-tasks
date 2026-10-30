@@ -151,8 +151,18 @@
         size,
       )
       el.className = `plt-tip plt-tip--${place.side}`
-      el.style.left = `${Math.round(place.left)}px`
-      el.style.top = `${Math.round(place.top)}px`
+      // 气泡此刻还在 left/top = 0，量到的视口位置就是**包含块原点**。
+      // 不靠猜 `.plt-root` 的 container-type 是否真把 fixed 收成了自己的包含块
+      // （各引擎/层叠上下文下并不一致），直接量一次再换算：
+      //   包含块是面板 → base.left ≈ panel.left，修正量为 0；
+      //   包含块是视口 → base.left = 0，修正量正好是面板原点。
+      // 少了这一步，侧栏不在窗口左上角时整块气泡会整体平移一个侧栏偏移（id=299）。
+      // 量之前先把方向类带来的 3px 位移抵消掉：否则换成相反方向时那 3px 会翻倍成 6px 偏差。
+      el.style.transform = 'none'
+      const base = el.getBoundingClientRect()
+      el.style.transform = ''
+      el.style.left = `${Math.round(place.left + (panel.left - base.left))}px`
+      el.style.top = `${Math.round(place.top + (panel.top - base.top))}px`
       el.style.visibility = ''
       // 下一帧再加 is-on，让 opacity 从 0 过渡过去；同一帧设会跳过过渡直接显示。
       el.dataset.on = 'pending'

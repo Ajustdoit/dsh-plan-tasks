@@ -130,16 +130,30 @@
     function dataSignature(data) {
       if (data === null || typeof data !== 'object') return ''
       const items = Array.isArray(data.items) ? data.items : []
-      const parts = items.map(
-        (it) =>
-          `${it.id}|${it.order}|${it.execute === true ? 1 : 0}|${it.review === true ? 1 : 0}|${it.draft === true ? 1 : 0}|${it.failed === true ? 1 : 0}|${it.startedAt ?? ''}|${it.noteLen ?? ''}|${it.planLen ?? ''}|${it.time ?? 0}|${it.name ?? ''}`,
-      )
+      // id=272：父节点下面挂着 children，子任务的状态变化也要让指纹变 ——
+      // 否则「子任务被标记完成」这一步在面板上不会重渲染，要等下一次别的变动才显示。
+      const one = (it) =>
+        `${it.id}|${it.order}|${it.execute === true ? 1 : 0}|${it.review === true ? 1 : 0}|${it.draft === true ? 1 : 0}|${it.failed === true ? 1 : 0}|${it.startedAt ?? ''}|${it.noteLen ?? ''}|${it.planLen ?? ''}|${it.time ?? 0}|${it.name ?? ''}`
+      const parts = items.map((it) => {
+        if (!Array.isArray(it.children) || it.children.length === 0) return one(it)
+        return `${one(it)}[${it.children.map(one).join(',')}]`
+      })
       return `${data.planExists === true ? 1 : 0}|${data.broken === true ? 1 : 0}|s${data.settings?.noteLimit ?? ''}|${parts.join(';')}`
     }
 
-    function fmtTime(ms) {
+    /**
+     * id=348：耗时字段的唯一解析口。宿主侧 store.normalizeItem 用的是同一套规则
+     * （缺失 / 非法 / 负数一律 0），这里必须对齐 —— 否则「盘上写的是 0、界面算成 NaN」
+     * 就会出现「同一批条目有的显示耗时、有的空白」。
+     */
+    function toMillis(ms) {
       const n = Number(ms)
-      if (!Number.isFinite(n) || n <= 0) return ''
+      return Number.isFinite(n) && n > 0 ? Math.round(n) : 0
+    }
+
+    function fmtTime(ms) {
+      const n = toMillis(ms)
+      if (n <= 0) return ''
       if (n < 1000) return `${n}ms`
       const s = Math.round(n / 1000)
       if (s < 60) return `${s} 秒`
@@ -157,8 +171,8 @@
        隐藏（0 在 store 语义里就是「还没测出耗时」：默认值和 clearTime 都归 0）。
        正数但不足 1 秒显示「1秒」，免得给真跑过的任务挂个「0秒」。 */
     function fmtDur(ms) {
-      const n = Number(ms)
-      if (!Number.isFinite(n) || n <= 0) return ''
+      const n = toMillis(ms)
+      if (n <= 0) return ''
       const s = Math.max(1, Math.round(n / 1000))
       if (s < 60) return `${s}秒`
       const m = Math.floor(s / 60)
@@ -199,6 +213,34 @@
      * 执行完成后的两种审核态（待审核 / 已审核）直接由这里给出，不再叠第二个标签。
      */
     function statusOf(item, impliedRunning = false) {
+      // id=274：父节点（拆解批次）自己没有执行状态 —— 它的 execute / review 只是容器
+      // 标记，真正在跑的是 children。所以父级的状态按子任务**聚合**：
+      // 只要有一条在跑就是「执行中」，整批做完未审是「待审核」，整批审完是「已审核」，
+      // 其余（还没轮到 / 有失败 / 有中断）才按待执行那一档的既有规则给。
+      const kids = Array.isArray(item.children) ? item.children : []
+      if (kids.length > 0) {
+        // 草稿优先：整批被标成草稿时，即使子任务都做完了也还是草稿（不能因为
+        // 下面那条「整批做完 = 待审核」把草稿洗成待审核）。
+        if (item.draft === true) return { key: 'draft', label: '草稿' }
+        // id=344：整批做完、但还有子任务没审 —— 这条父是「待审核」，不是「待执行」。
+        // 队列侧已经不把它当可执行任务（正文为空），面板这一侧也必须同口径，
+        // 否则会出现「点了开始，什么都没发生」的观感。
+        // 注意要排除「全都审完了」：那是下面的 reviewed 分支，不能被这里抢走。
+        if (item.review !== true
+          && kids.every((kid) => kid?.execute === true)
+          && !kids.every((kid) => kid?.review === true)) {
+          return { key: 'unreviewed', label: '待审核' }
+        }
+        const states = kids.map((child) => statusOf(child))
+        if (states.some((s) => s.key === 'running')) return { key: 'running', label: '执行中' }
+        if (states.every((s) => s.key === 'reviewed')) return { key: 'reviewed', label: '已审核' }
+        if (states.every((s) => s.key === 'reviewed' || s.key === 'unreviewed')) return { key: 'unreviewed', label: '待审核' }
+        if (states.every((s) => s.key === 'failed')) return { key: 'failed', label: '失败' }
+        if (states.some((s) => s.key === 'failed')) return { key: 'failed', label: '部分失败' }
+        if (states.every((s) => s.key === 'interrupted')) return { key: 'interrupted', label: '已中断' }
+        if (impliedRunning === true) return { key: 'running', label: '执行中' }
+        return { key: 'todo', label: '待执行' }
+      }
       if (item.draft === true) return { key: 'draft', label: '草稿' }
       if (item.execute === true) {
         return item.review === true

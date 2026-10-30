@@ -214,6 +214,28 @@ body:not([data-ds-dark-theme]) .plt-sec-toggle:hover .plt-sec-h{color:#2b3240}
 body:not([data-ds-dark-theme]) .plt-sec-toggle .plt-sec-caret{color:#7a828e}
 body:not([data-ds-dark-theme]) .plt-meta{color:#59606c}
 body:not([data-ds-dark-theme]) .plt-group-count{color:#59606c}
+/* id=275：拆解批次的层级线在白底上要压深一档，否则 2px 的 accent 半透明线和
+   「小横钩」几乎看不见；父行的强调竖杠同理，浅色下用不透明的 accent。 */
+body:not([data-ds-dark-theme]) .plt-kids-list{border-left-color:rgba(var(--plt-accent),.34)}
+body:not([data-ds-dark-theme]) .plt-kid::before{background:rgba(var(--plt-accent),.40)}
+body:not([data-ds-dark-theme]) .plt-kid:hover::before{background:rgba(var(--plt-accent),.72)}
+body:not([data-ds-dark-theme]) .plt-item.plt-parent > .plt-head::before{background:rgba(var(--plt-accent),.72)}
+body:not([data-ds-dark-theme]) .plt-item.plt-parent.open > .plt-head::before{background:rgba(var(--plt-accent),1)}
+body:not([data-ds-dark-theme]) .plt-kid{background:rgba(15,30,60,.028);border-color:rgba(20,40,70,.14)}
+body:not([data-ds-dark-theme]) .plt-kid:hover{background:rgba(15,30,60,.048);border-color:rgba(var(--plt-accent),.42)}
+body:not([data-ds-dark-theme]) .plt-kid-h .plt-id{color:#5f6672}
+body:not([data-ds-dark-theme]) .plt-kid-note{color:#59606c}
+/* id=317：「已做的子任务」（id=316）在浅色下要逐项对齐 —— 深色那套吃的是
+   rgba(255,255,255,.xx) 与 dsw 变量，白底上要么看不见、要么把字刷淡到读不清。
+   这里只用两种既有色阶：bluish-700（文字）与 accent 的 alpha（装饰），不引入新色值。 */
+body:not([data-ds-dark-theme]) .plt-kid.plt-kid-done{background:rgba(15,30,60,.045);border-color:rgba(20,40,70,.10)}
+body:not([data-ds-dark-theme]) .plt-kid.plt-kid-done:hover{background:rgba(15,30,60,.075);border-color:rgba(var(--plt-accent),.34)}
+body:not([data-ds-dark-theme]) .plt-kid-done .plt-kid-name{color:#3c4653}
+body:not([data-ds-dark-theme]) .plt-kid-done .plt-kid-plan{color:#4a5563;opacity:1}
+body:not([data-ds-dark-theme]) .plt-kid-done .plt-kid-note{color:#59606c;opacity:1}
+body:not([data-ds-dark-theme]) .plt-kid-done::before{background:rgba(var(--plt-accent),.24)}
+body:not([data-ds-dark-theme]) .plt-kid-check{color:#17559c;background:rgba(var(--plt-accent),.14)}
+body:not([data-ds-dark-theme]) .plt-body.plt-body-parent{border-top-color:rgba(var(--plt-accent),.26)}
 /* id=240：收起态「正在执行」提示。深色那条吃的是 rgba(var(--plt-accent),.95)，
    浅色下四组 accent 已压深（id=226/228），alpha 再拉满一档到这里：不放白底上会发灰。 */
 body:not([data-ds-dark-theme]) .plt-group-run{color:rgba(var(--plt-accent),1)}
@@ -246,7 +268,6 @@ body:not([data-ds-dark-theme]) .plt-caret,body:not([data-ds-dark-theme]) .plt-gr
    （白底 2.13:1、卡片底 1.98:1），小字基本看不见。统一压到 bluish-700 一档。
    .plt-pin 只在 hover 时才显现，但显现的那一下必须看得清，所以基线色也要给。 */
 body:not([data-ds-dark-theme]) .plt-sec-hint{color:#646b77}
-body:not([data-ds-dark-theme]) .plt-restart-tip{color:#646b77}
 body:not([data-ds-dark-theme]) .plt-pin{color:#646b77}
 body:not([data-ds-dark-theme]) .plt-tag.type{color:#59606c;border-color:rgba(20,40,70,.18)}
 body:not([data-ds-dark-theme]) .plt-check.locked{opacity:.72}

@@ -1,5 +1,5 @@
     /**
-     * 顶部栏与通用按钮：面板根、标题、刷新/自动刷新/重启按钮。
+     * 顶部栏与通用按钮：面板根、标题、刷新/自动刷新按钮。
      *
      * 本片段是 CSS_PARTS 的一段，位置即层叠顺序（由 build.mjs 按文件名字典序拼接）。
      */
@@ -21,10 +21,6 @@
 .plt-auto .plt-dot{width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-label-caption,#8a8a8a);flex:0 0 auto}
 .plt-auto.on{color:var(--dsw-alias-label-accent,#7fb0ff);border-color:rgba(80,140,255,.45)}
 .plt-auto.on .plt-dot{background:#4caf50;box-shadow:0 0 0 2px rgba(76,175,80,.18)}
-/* 重启按钮：幽灵按钮，只在 hover 时透出一点暖色，避免和「刷新」抢注意力。 */
-.plt-restart{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto}
-.plt-restart:hover:not(:disabled){background:rgba(236,72,153,.10);border-color:rgba(236,72,153,.34)}
-.plt-restart-tip{color:var(--dsw-alias-label-caption,#9a9a9a);font-size:13px}
 /* 刷新按钮（id=196/197）：图标位 + 文案位，图标默认静止。
    inline-flex + gap 让图标与文字在一行内垂直居中；不用 margin 拼间距，
    否则按钮被压窄时两端留白不对称。颜色走 currentColor，
@@ -42,12 +38,12 @@
 .plt-refresh-ico.spinning svg{animation:plt-spin .9s linear infinite;transform-origin:50% 50%}
 .plt-refresh-ico.idle svg{animation:none;opacity:1}
 @media (prefers-reduced-motion: reduce){.plt-refresh-ico.spinning svg{animation:none}}
-/* 开始 / 暂停（id=207）：与刷新、重启同族的图标按钮。
+/* 开始 / 暂停（id=207）：与刷新同族的图标按钮。
    inline-flex + gap 让图标与文字垂直居中并保持固定间距；flex:0 0 auto
    保证顶栏被压窄时这两个按钮不参与收缩，压缩全部由 .plt-title 承担。 */
 .plt-start,.plt-pause{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto}
 /* 开始按钮是这一行里唯一的主动作，给一点绿色倾向（不是实心，仍然克制），
-   让它在「自动刷新」「刷新」「重启」三个中性按钮里能被一眼找到。 */
+   让它在「自动刷新」「刷新」两个中性按钮里能被一眼找到。 */
 .plt-start:not(:disabled){color:var(--dsw-alias-label-primary,#e6e6e6)}
 .plt-start:not(:disabled):hover{background:rgba(34,150,84,.14);border-color:rgba(34,150,84,.42)}
 /* 暂停是反向动作，hover 透出暖橙，与开始分得开又不至于像报错。 */

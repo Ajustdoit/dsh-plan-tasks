@@ -312,6 +312,41 @@
       )
     }
 
+    /**
+     * 垃圾桶图标（id=353）：待执行条目操作区里的「删除这一条」。
+     *
+     * 线稿风格与 CopyIcon / PinTopIcon 一脉相承（viewBox 24、stroke 2、圆角端点），
+     * 颜色走 currentColor —— 深色主题下不需要单独换色，浅色主题由 .plt-actions 的颜色决定。
+     * 尺寸默认 13（与相邻按钮的文字行高 20px 视觉齐平），不参与基线对齐。
+     */
+    function TrashIcon(props) {
+      const size = typeof props?.size === 'number' && props.size > 0 ? props.size : 13
+      return h(
+        'svg',
+        {
+          xmlns: 'http://www.w3.org/2000/svg',
+          viewBox: '0 0 24 24',
+          width: size,
+          height: size,
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 2,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+          'aria-hidden': 'true',
+          style: { display: 'block', flex: '0 0 auto' },
+        },
+        // 桶盖：顶盖 + 提手
+        h('path', { d: 'M4 6.5h16' }),
+        h('path', { d: 'M9.5 6.5V4.6a1.1 1.1 0 0 1 1.1-1.1h2.8a1.1 1.1 0 0 1 1.1 1.1v1.9' }),
+        // 桶身：上宽下窄的梯形
+        h('path', { d: 'M6.2 6.5l1 13.1a1.6 1.6 0 0 0 1.6 1.4h6.4a1.6 1.6 0 0 0 1.6-1.4l1-13.1' }),
+        // 两道竖纹
+        h('path', { d: 'M10.2 10.4v7' }),
+        h('path', { d: 'M13.8 10.4v7' }),
+      )
+    }
+
     /** 置顶图标：一根竖线 + 向上的箭头，表示「排到最前面」。 */
     function PinTopIcon(props) {
       const size = typeof props?.size === 'number' && props.size > 0 ? props.size : 12

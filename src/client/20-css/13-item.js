@@ -57,7 +57,11 @@
 .plt-group-h:hover{background:var(--dsw-alias-bg-hover,rgba(255,255,255,.06))}
 .plt-group-h.open .plt-caret{transform:rotate(90deg)}
 .plt-group-name{flex:1 1 auto;font-size:14.5px;font-weight:600;color:var(--dsw-alias-label-secondary,#c8c8c8);letter-spacing:.02em}
-.plt-group-count{flex:0 0 auto;font-size:12.5px;line-height:18px;padding:0 7px;border-radius:999px;background:var(--dsw-alias-bg-hover,rgba(255,255,255,.08));color:var(--dsw-alias-label-caption,#9a9a9a)}
+/* id=337：条数统计固定在组头最右端（DOM 里也确实排在所有控件之后）。
+   margin-left:auto 是双保险：即使将来有人在它后面又插了节点，读数仍然贴着右侧收口。
+   等宽数字（tabular-nums）+ 三位补零：001 / 012 / 123 宽度一致，
+   组与组之间同一列对齐，展开收起时右边界不会跟着数字位数抖。 */
+.plt-group-count{flex:0 0 auto;margin-left:auto;min-width:46px;box-sizing:border-box;text-align:center;font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;font-size:12.5px;line-height:18px;padding:0 7px;border-radius:999px;background:var(--dsw-alias-bg-hover,rgba(255,255,255,.08));color:var(--dsw-alias-label-caption,#9a9a9a)}
 /* 「已审核」上限下拉（id=188/190）：只出现在已审核组头右侧。
    appearance:none + data-uri 箭头 —— 原生 select 的箭头在暗色面板里是一个亮块，
    颜色由系统画、CSS 管不着，只能自绘。

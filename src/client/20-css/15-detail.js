@@ -21,13 +21,24 @@
 /* 执行失败：模型已跳过。留在待执行组里，颜色和「执行中」分开，避免看起来还在跑。 */
 .plt-tag.failed{background:rgba(220,80,70,.16);color:#f0a8a2;border-color:rgba(220,80,70,.42)}
 /* 执行中：转圈图标匀速旋转，作为「还在跑」的活信号（减少动态偏好下停转）。 */
+/* 执行中徽标只放一个转圈（id=352-D）：外框固定 26×20，与文字徽标的行高对齐，
+   所以这一条从文字变图标时整列右边界不会移动。颜色继承 .plt-tag.running 的 color，
+   深浅主题各自由 30-light.js 的既有规则决定，这里不再写第二套颜色。 */
+.plt-tag.plt-run-only{width:26px;height:20px;padding:0;justify-content:center;box-sizing:border-box}
+/* 空文字节点会撑出 1px 的基线空隙，转圈本身不占文字宽度，压掉。 */
+.plt-tag.plt-run-only > span{display:none}
 .plt-spin{animation:plt-spin .9s linear infinite;transform-origin:50% 50%}
 @keyframes plt-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion: reduce){.plt-spin{animation:none}}
 .plt-tag.todo{background:rgba(140,140,140,.16);color:var(--dsw-alias-label-caption,#9a9a9a);border-color:rgba(140,140,140,.3)}
 .plt-tag.type{background:transparent;color:var(--dsw-alias-label-caption,#9a9a9a);border-color:var(--dsw-alias-border-secondary,rgba(255,255,255,.14))}
 /* 置顶按钮：平时淡到几乎看不见，鼠标移到这一行才亮起来，不抢标题的宽度。 */
-.plt-pin{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;margin-left:-2px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-caption,#8a8a8a);opacity:0;cursor:pointer;transition:opacity .14s ease,background .14s ease,border-color .14s ease,color .14s ease}
+/* id=320：槽位恒定占 20px（与按钮同宽），按钮在槽位里居中。
+   为什么要有槽位：拆分批次行永远没有置顶按钮（见 50-item.js 的 pinTop 判定），
+   没有槽位时它们的状态标签会比普通行右移 20px，纵向扫视时那一列是锯齿。
+   槽位空着也不收窄 —— 收窄就回到锯齿。 */
+.plt-pin-slot{flex:0 0 20px;display:inline-flex;align-items:center;justify-content:center;height:20px}
+.plt-pin{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-caption,#8a8a8a);opacity:0;cursor:pointer;transition:opacity .14s ease,background .14s ease,border-color .14s ease,color .14s ease}
 .plt-head:hover .plt-pin,.plt-pin:focus-visible{opacity:1}
 .plt-pin:hover{background:rgba(var(--plt-accent,120,168,255),.18);border-color:rgba(var(--plt-accent,120,168,255),.5);color:rgba(var(--plt-accent,120,168,255),1)}
 .plt-pin:active{transform:translateY(.5px)}
@@ -83,6 +94,15 @@
 .plt-check.locked{cursor:default;opacity:.62}
 .plt-check.locked input{cursor:not-allowed}
 .plt-check.locked span::after{content:' · 模型回填';font-size:14px;opacity:.65}
+/* 图标按钮（id=353）：36×26 的固定热区，与相邻按钮同高（.plt-btn 的 20px 行高 +
+   3px 上下内边距 = 26px），所以加进 .plt-actions 不会把这一排顶到第二行。
+   宽度写死而不是靠 padding 撑 —— 图标宽度一变，热区不该跟着抖。 */
+.plt-icon-btn{display:inline-flex;align-items:center;justify-content:center;width:36px;height:26px;padding:0;border-radius:6px;line-height:1}
+/* 垃圾桶用删除色，与文字「删除」按钮同一套色：两个入口看起来是同一件事。 */
+.plt-icon-btn.plt-trash{color:#d46a6a;border-color:rgba(212,106,106,.35)}
+.plt-icon-btn.plt-trash:hover:not(:disabled){background:rgba(212,106,106,.14);border-color:rgba(212,106,106,.6)}
+/* 触屏上热区再放大一点（26px 的高度在手指下偏小），不影响桌面布局。 */
+@media (hover:none){.plt-icon-btn{width:40px;height:32px}}
 .plt-del{margin-left:auto;color:#d46a6a;border-color:rgba(212,106,106,.35)}
 /* 删除键已经收进 .plt-actions，靠右由容器负责，这里不能再 margin-left:auto，否则会把同组的「转为待执行」推开。 */
 .plt-checks .plt-actions .plt-del{margin-left:0}`)
