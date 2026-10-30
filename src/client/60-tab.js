@@ -101,17 +101,24 @@
       const pausingRef = React.useRef(false)
       // id=234：模型响应中断的对账机制要用的三面旗子。
       // pausedByUserRef —— 这一轮是用户自己点暂停停的（暂停路径已经写过 interrupted，别再覆盖提示）；
-      // wasRunningRef  —— 上一帧的会话 running，用来捕捉「true → false」这个唯一可得的中断信号；
-      // reconcilingRef —— 对账请求在飞，别叠第二次。
+      // wasRunningRef  —— 对账 effect 自己的上一帧 running。不能和派发共用：
+      //   两个 effect 同一次提交里按声明顺序跑，谁先写谁就把 true→false 边沿吃掉。
+      // wasDispatchRunningRef —— 派发 effect 自己的上一帧 running，只给「回答结束 → 派下一条」用。
+      // reconcilingRef —— 对账请求在飞，别叠第二次。派发看到它是真的就等它落盘，不能因此丢掉边沿。
+      // agentRunningRef —— 异步派发途中读「现在是不是又跑起来了」，闭包里的 agentRunning 是旧的。
+      // dispatchEpochRef —— 换会话时加一，作废还在飞的派发，避免把上一个会话的下一条投进新会话。
       // id=352-E：初值必须是 null（**未知**），不能是 false。
       // 用 false 的话，页面刷新后第一次观测到的 running 已经是 false，
       // `was !== true` 直接 return —— 对账那次永远不跑，孤儿 startedAt 就再也救不回来。
       // 现在 null 表示「还没观测过」，第一次观测无条件对账一次。
       const pausedByUserRef = React.useRef(false)
       const wasRunningRef = React.useRef(null)
+      const wasDispatchRunningRef = React.useRef(null)
       const reconcilingRef = React.useRef(false)
+      const agentRunningRef = React.useRef(false)
+      const dispatchEpochRef = React.useRef(0)
       // id=341：这一轮结束后是否已经派过下一条。会话 running 会抖（工具调用之间也算空闲），
-      // 没有这个标记就会在同一个空档里连派几条。
+      // 没有这个标记就会在同一个空档里连派几条。只在真正发出请求时置位；定时器被清掉或请求失败要放回来。
       const dispatchedRef = React.useRef(false)
       // 已挂起（id=208）：只存内存，不写 plan.json。页面刷新后按「有未完成且无 turn 在跑」
       // 自然回落为「未开始」，不需要一个跨会话会失效的持久状态字段。
@@ -218,6 +225,7 @@
       // 只看 plan.json 的 startedAt 不够：开工那一小段模型还没回写 startedAt，
       // 或者模型在思考 / 写代码时文件一直没变，按钮都会误判成「没在干活」。
       const [agentRunning, setAgentRunning] = React.useState(false)
+      agentRunningRef.current = agentRunning === true
       React.useEffect(() => {
         if (typeof sessionId !== 'string' || sessionId === '') {
           setAgentRunning(false)
@@ -338,10 +346,13 @@
         startingRef.current = false
         pausingRef.current = false
         pausedByUserRef.current = false
-        // 换会话 = 重新观测，回到「未知」。
+        // 换会话 = 重新观测，回到「未知」。两面 running 边沿都要清，否则会把上一个会话的
+        // true→false 当成这个会话的「回答结束」。
         wasRunningRef.current = null
+        wasDispatchRunningRef.current = null
         reconcilingRef.current = false
         dispatchedRef.current = false
+        dispatchEpochRef.current += 1
         setStarting(false)
         setPausing(false)
         setPaused(false)
@@ -655,14 +666,14 @@
         return done
       }
 
-      /** 手动开工：把「开始干活」真的发进当前会话（左侧对话里能看到），
-       * 由模型按 plan-tasks 技能去取待执行计划。
-       * id=209 起兼任「继续」：已挂起时发的是「继续干活」，语义上与首次开工区分开。 */
+      /** 手动开工：把队首任务的派发正文发进当前会话，和一轮结束后的自动派发是同一段话。
+       * 这样模型不用先读技能、再跑 status 才知道做什么。
+       * id=209 起兼任「继续」：队首若已派过还没 done，force 会把同一条再发一遍（带上次做到）。 */
       const startWork = async () => {
         // 按钮 disabled 只是第一层：这里再挡一次，避免「执行中连点」重复灌提示词。
         // working 为 false 但 paused 为 true 时放行 —— 那正是「继续」的入口。
         if (startingRef.current || starting || working) return
-        const text = paused ? RESUME_TEXT : KICKOFF_TEXT
+        const resume = paused === true
         startingRef.current = true
         setStarting(true)
         // 续做前先记下要摘掉「已中断」标记的那一条：`startedAt` 还在，摘掉标记后
@@ -675,6 +686,13 @@
         const resumeIds = resumeOne === undefined ? [] : [resumeOne.id]
         setPaused(false)
         try {
+          const preview = await call('dispatch', { ...payload, dryRun: true, force: true })
+          if (preview === null || typeof preview !== 'object' || preview.dispatched !== true) {
+            if (resume) setPaused(true)
+            setNotice(preview?.reason === 'empty' ? '没有可执行的待办' : '没有可派发的任务', NOTICE_LONG_MS)
+            return
+          }
+          const text = typeof preview.text === 'string' ? preview.text : ''
           let sent = false
           try {
             sent = await kickoffViaClient(ctx, sessionId, text)
@@ -682,18 +700,20 @@
             sent = false
             if (error instanceof Error && error.message !== '') throw error
           }
-          if (!sent) await call('kickoff', { ...payload, text })
-          setNotice(`已发送「${text}」`)
+          // 浏览器发出去之后只记账（ack），避免宿主再 prompt 一次变成两条用户消息。
+          if (sent) await call('dispatch', { ...payload, force: true, ack: true })
+          else await call('dispatch', { ...payload, force: true })
+          setNotice(`${resume ? '继续' : '已派发'}：${preview.taskId}`, NOTICE_LONG_MS)
           // id=234：新一轮开跑了，主动暂停的标记要撤掉，否则下一轮中断不会被对账处理。
           pausedByUserRef.current = false
           // 发送成功了才摘标记：发不出去还留在「已中断」是对的，不能被这次点击洗掉。
           if (resumeIds.length > 0) await markInterrupted(resumeIds, false)
         } catch (error) {
           // 发送失败要把「已挂起」还回去，否则界面会显示「继续」但其实什么都没发出去。
-          if (text === RESUME_TEXT) setPaused(true)
+          if (resume) setPaused(true)
           setState((prev) => ({
             ...prev,
-            error: `发送「${text}」失败：${error instanceof Error ? error.message : String(error)}`,
+            error: `派发失败：${error instanceof Error ? error.message : String(error)}`,
           }))
         } finally {
           startingRef.current = false
@@ -823,35 +843,78 @@
        * 我们才把下一条作为新的用户消息发进去。谁来做下一条由宿主算（queue-cli 的 nextTask），
        * 不再让模型自己扫待办 —— 技能正文里那条「做完立刻 start 下一条」已经删掉。
        *
+       * 边沿必须用 wasDispatchRunningRef，不能读 wasRunningRef。对账 effect 写在前面，
+       * 同一次提交里会先把那面旗子写成 false，派发再读就永远看不到 true→false，
+       * 表现就是「这条做完了，下一条再不发」。
+       *
        * 几种不该派的情况：
        * - 用户主动暂停（pausedByUserRef）：他要的就是停下来看看；
-       * - 正在中断对账（reconcilingRef）：先把中断状态写干净，否则会派到「刚被标中断」的那条；
+       * - 会话又跑起来了（工具空档、或用户接着聊）：这不是一轮的结束；
        * - 这一轮已经派过（dispatchedRef）：running 会抖，别连派；
-       * - 队列空了：dispatch 自己会返回 empty，这里不提示也不报错。
+       * - 队首已派发但还没 done（reason inflight）：不跳到后面的条目，短重试等回填；
+       * - 队列空了：dispatch 自己会返回 empty。
+       *
+       * 对账进行中不能直接 return。那样边沿被消费掉，对账结束（只改 ref）不会再进这个 effect。
+       * 定时器里等到 reconcilingRef 落下再发。
        *
        * 失败只记一条提示，不弹错误弹窗：派发失败最多是「停在原地」，用户再点一次开始即可，
        * 不该盖掉屏幕上更重要的内容。
        */
       React.useEffect(() => {
-        const was = wasRunningRef.current
-        wasRunningRef.current = agentRunning === true
+        const was = wasDispatchRunningRef.current
+        wasDispatchRunningRef.current = agentRunning === true
         if (agentRunning === true) {
           // 新一轮开跑：允许它结束后再派一次。
           dispatchedRef.current = false
           return undefined
         }
         if (was !== true) return undefined
-        if (pausedByUserRef.current === true || reconcilingRef.current === true) return undefined
-        if (dispatchedRef.current === true) return undefined
-        dispatchedRef.current = true
-        let cancelled = false
+        if (pausedByUserRef.current === true) return undefined
+        const epoch = dispatchEpochRef.current
+        let started = false
         const timer = window.setTimeout(() => {
+          started = true
           void (async () => {
+            // 换会话、用户暂停、或会话又跑起来：这次空档不算「回答结束」。
+            const still = () =>
+              dispatchEpochRef.current === epoch
+              && pausedByUserRef.current !== true
+              && agentRunningRef.current !== true
+            const deadline = Date.now() + DISPATCH_SETTLE_MS
+            while (reconcilingRef.current === true && Date.now() < deadline) {
+              if (!still()) return
+              await new Promise((resolve) => window.setTimeout(resolve, 100))
+            }
+            if (!still()) return
+            if (dispatchedRef.current === true) return
+            dispatchedRef.current = true
             try {
-              // 先等中断对账落盘（它比派发早一个 effect，但请求是并发的）。
-              const data = await call('dispatch', { ...payload })
-              if (cancelled || data === null || typeof data !== 'object') return
+              let data = null
+              for (let attempt = 0; attempt <= DISPATCH_INFLIGHT_RETRIES; attempt += 1) {
+                if (!still()) {
+                  dispatchedRef.current = false
+                  return
+                }
+                data = await call('dispatch', { ...payload })
+                if (dispatchEpochRef.current !== epoch) {
+                  dispatchedRef.current = false
+                  return
+                }
+                if (data === null || typeof data !== 'object') {
+                  dispatchedRef.current = false
+                  return
+                }
+                if (data.reason !== 'inflight') break
+                if (attempt === DISPATCH_INFLIGHT_RETRIES) break
+                await new Promise((resolve) => window.setTimeout(resolve, DISPATCH_INFLIGHT_GAP_MS))
+              }
+              if (data === null || typeof data !== 'object') {
+                dispatchedRef.current = false
+                return
+              }
               if (data.dispatched !== true) {
+                // 没发出去就要允许下一次 true→false 再派。卡在 true 上，队列会一直停。
+                dispatchedRef.current = false
                 if (data.reason === 'empty') {
                   // id=343：正常收工。把这一轮留下的运行态一起收掉，否则顶栏会停在
                   // 「干活中 / 继续」上，而队列其实已经空了 —— 用户只能靠刷新页面摆脱它。
@@ -859,21 +922,30 @@
                   pausedByUserRef.current = false
                   setNotice(data.finished === true ? '待办已清空，本轮执行结束' : '本轮执行结束', NOTICE_LONG_MS)
                   void sync()
+                } else if (data.reason === 'inflight') {
+                  const id = data.taskId === null || data.taskId === undefined ? '' : String(data.taskId)
+                  setNotice(
+                    id !== '' ? `上一条 ${id} 还没回填完成，暂不派发下一条` : '上一条还没回填完成，暂不派发下一条',
+                    NOTICE_LONG_MS,
+                  )
+                  void sync()
                 }
                 return
               }
-              // 重投（同一组整轮投完之后回到第一条）要说明白，否则看起来像重复发送。
-              setNotice(data.redelivered === true ? `重新派发：${data.taskId}` : `已派发下一条：${data.taskId}`, NOTICE_MS)
+              // 用长提示：成功派发是这条链还在走的唯一可见信号，短提示容易被下一帧盖掉。
+              setNotice(data.redelivered === true ? `重新派发：${data.taskId}` : `已派发下一条：${data.taskId}`, NOTICE_LONG_MS)
               // 派出去之后立刻读一次，让新条目的「执行中」状态尽快出现。
               void sync()
             } catch (error) {
+              dispatchedRef.current = false
               setNotice(`派发下一条失败：${error instanceof Error ? error.message : String(error)}`, NOTICE_LONG_MS)
             }
           })()
         }, DISPATCH_SETTLE_MS)
         return () => {
-          cancelled = true
-          window.clearTimeout(timer)
+          // 请求已经发出就别清：prompt 会把 running 拉回 true，cleanup 若把结果扔掉，
+          // 下一条其实发出去了，面板却没有任何「已派发」提示。
+          if (!started) window.clearTimeout(timer)
         }
       }, [agentRunning, sessionId, cwd])
 
@@ -1025,9 +1097,7 @@
           if (!silent) {
             setNotice(
               reviewed
-                ? `已审核通过 #${id}${
-                    Number(data?.trimmedCount) > 0 ? ` · 超过保留条数，已清理最旧 ${data.trimmedCount} 条` : ''
-                  }${backupSuffix(data)}`
+                ? `已审核通过 #${id}`
                 : value.review === false
                   ? `已取消审核 #${id}`
                   : typeof value.plan === 'string'
@@ -1035,10 +1105,6 @@
                     : `已更新 #${id}`,
             )
           }
-          // 宿主这次顺带裁掉了旧条目：乐观合并只更新了改动的这一条，
-          // 被删的那些还留在本地 state 里，会一直显示到下一次轮询（最多 5 秒）。
-          // 立刻 sync 一次，别让已经不存在的东西摆在面板上。
-          if (Number(data?.trimmedCount) > 0) await sync()
           return data
         } catch (error) {
           setState((prev) => ({ ...prev, error: error instanceof Error ? error.message : String(error) }))
@@ -1163,47 +1229,9 @@
       }
 
       /**
-       * 「需要保留的 note 条数」下拉的 change（id=188，id=268 改名/换档）。
-       *
-       * 值只有一个来源——宿主读回的 `data.settings.noteLimit`，所以这里不存本地副本：
-       * 下拉显示的就是磁盘上的真值，不会出现「界面选了 100、文件里还是 200」的错位。
-       *
-       * 裁剪本身放在宿主写设置时做（见 #189/#269），不在客户端算：两边各算一遍 FIFO，
-       * 一旦排序方向理解不同就会删错条目。这里只负责「写回 + 重读 + 提示」。
-       */
-      const changeNoteLimit = async (value) => {
-        const next = Number(value)
-        await run(async () => {
-          const saved = await call('settings', { ...payload, patch: { noteLimit: next } })
-          const cut = Number(saved?.trimmedCount) || 0
-          setNotice(
-            cut > 0
-              ? `保留 note ${next} 条 · 清理最旧 ${cut} 条${backupSuffix(saved)}`
-              : `保留 note：${next} 条`,
-          )
-          return call('read', { ...payload, lite: true })
-        })
-      }
-
-      /**
-       * 「裁剪前备份」复选开关（id=256）。
-       *
-       * 与保留条数下拉同款：值只有一个来源——宿主读回的 `settings.backupBeforeTrim`，
-       * 这里不存本地副本，勾选状态永远等于磁盘上的真值。
-       * 勾选立刻落盘（不用等下一次裁剪），因为用户预期的就是「从现在起都备份」。
-       */
-      const changeBackupBeforeTrim = async (value) => {
-        await run(async () => {
-          await call('settings', { ...payload, patch: { backupBeforeTrim: value === true } })
-          setNotice(value === true ? '裁剪前会备份到 .plan/planBack.json' : '裁剪前不再备份')
-          return call('read', { ...payload, lite: true })
-        })
-      }
-
-      /**
        * 「待审核自动通过条数」下拉的 change（id=300）。
        *
-       * 与保留条数同款：写回 → 宿主立刻按新阈值补一轮自动通过 + 归档 → 重读。
+       * 写回 → 宿主立刻按新阈值补一轮自动通过 + 归档 → 重读。
        * `autoApproved` 是这次真被通过掉的 id（宿主回传），有就报一句，
        * 免得用户看到待审核凭空少了几条却不知道为什么。
        */
@@ -1284,8 +1312,8 @@
                 pendingCount === 0
                   ? '没有待执行的计划'
                   : pausedIdle
-                    ? `从挂起处继续（发出「${RESUME_TEXT}」），已完成的条目不会重做`
-                    : `让模型开始执行待办计划（发出「${KICKOFF_TEXT}」）`,
+                    ? '从挂起处继续队首这条计划，已完成的不会重做'
+                    : `把队首任务发进会话（按钮「${KICKOFF_TEXT}」），模型不用再自己找下一条`,
               onClick: (e) => {
                 e.stopPropagation()
                 void startWork()
@@ -1528,55 +1556,8 @@
                                     h('span', { className: 'plt-group-run-txt' }, '正在执行'),
                                   )
                                 : null,
-                              // 「需要保留的 note 条数」下拉（id=188，id=268 改名/换档）。
-                              // 档位列表由宿主 constants.js 下发（100/200/500/1000），
-                              // 这里不抄第二份数组；宿主版本太旧、没有这个字段时整块不渲染，
-                              // 避免出现一个点下去只会报错的死控件。
-                              group.key === 'reviewed' && Array.isArray(state.data?.noteLimits)
-                                ? h(
-                                    'select',
-                                    {
-                                      className: 'plt-limit',
-                                      value: String(state.data?.settings?.noteLimit ?? 200),
-                                      disabled: busy,
-                                      'aria-label': '需要保留的 note 条数',
-                                      'data-tip': '需要保留的 note 条数；超出按先进先出删掉最旧的 note',
-                                      onClick: (e) => e.stopPropagation(),
-                                      onChange: (e) => void changeNoteLimit(e.target.value),
-                                    },
-                                    state.data.noteLimits.map((n) =>
-                                      h('option', { key: String(n), value: String(n) }, String(n)),
-                                    ),
-                                  )
-                                : null,
-                              // 「裁剪前先备份」开关（id=256）。只在真会裁剪时才有意义：
-                              // 保留条数恒为正（不再有「无限」档），所以这里只校验档位列表存在。
-                              group.key === 'reviewed' &&
-                              Number(state.data?.settings?.noteLimit ?? 0) > 0 &&
-                              Array.isArray(state.data?.noteLimits)
-                                ? h(
-                                    'label',
-                                    {
-                                      className: `plt-backup${state.data?.settings?.backupBeforeTrim === true ? ' is-on' : ''}`,
-                                      'data-tip':
-                                        '勾选后，每次裁剪已审核条目前先把完整 plan.json 备份成 .plan/planBack.json（覆盖上一份）',
-                                      onClick: (e) => e.stopPropagation(),
-                                    },
-                                    h('input', {
-                                      type: 'checkbox',
-                                      className: 'plt-backup-box',
-                                      checked: state.data?.settings?.backupBeforeTrim === true,
-                                      disabled: busy,
-                                      'aria-label': '裁剪前备份完整 JSON',
-                                      onChange: (e) => void changeBackupBeforeTrim(e.target.checked),
-                                    }),
-                                    h('span', { className: 'plt-backup-txt' }, '备份'),
-                                  )
-                                : null,
                               // 「待审核超过 N 条自动通过最旧一条」的条数（id=300）。
-                              // 位置就在「待审核」组头里，与已审核那个下拉同款：档位同样由
-                              // 宿主下发的 noteLimits 决定（用户要求「选项与已审核一致」），
-                              // 值也只认磁盘真值，不在本地存副本。
+                              // 档位由宿主下发的 noteLimits 决定。已审核不再按条数删除，所以这个下拉只出现在待审核。
                               group.key === 'unreviewed' && Array.isArray(state.data?.noteLimits)
                                 ? h(
                                     'select',
@@ -1585,7 +1566,7 @@
                                       value: String(state.data?.settings?.autoReviewLimit ?? 200),
                                       disabled: busy,
                                       'aria-label': '待审核自动通过的条数',
-                                      'data-tip': '待审核超过这个条数时，自动通过最旧的一条；档位与「已审核」的保留条数一致',
+                                      'data-tip': '待审核超过这个条数时，自动通过最旧的一条，并搬进已审核。已审核会一直保留',
                                       onClick: (e) => e.stopPropagation(),
                                       onChange: (e) => void changeAutoReviewLimit(e.target.value),
                                     },
@@ -1754,7 +1735,7 @@
                                               'data-tip':
                                                 working
                                                   ? '模型正在干活，等它完成再开始下一条'
-                                                  : `向左侧会话发送「${KICKOFF_TEXT}」，开始执行待执行里的计划`,
+                                                  : '把队首任务发进左侧会话，和后面自动派发的是同一段正文',
                                               onClick: (e) => {
                                                 e.stopPropagation()
                                                 void startWork()

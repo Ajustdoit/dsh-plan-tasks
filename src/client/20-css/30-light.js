@@ -246,18 +246,6 @@ body:not([data-ds-dark-theme]) .plt-group-run{color:rgba(var(--plt-accent),1)}
 body:not([data-ds-dark-theme]) .plt-limit{border-color:rgba(96,106,122,.39);background-color:rgba(96,106,122,.1);background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%2359606c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");color:#3c434e}
 body:not([data-ds-dark-theme]) .plt-limit:hover:not(:disabled){border-color:rgba(96,106,122,.5);background-color:rgba(96,106,122,.16)}
 body:not([data-ds-dark-theme]) .plt-limit option{background:#ffffff;color:#2b3240}
-/* 「裁剪前备份」开关（id=256）。深色那条吃的是组 accent + 半透明底，
-   浅色下 accent 已压深（id=226/228），但半透明底叠白几乎看不出边界，
-   所以这里给实色的描边与文字，勾选态用实心强调块。 */
-body:not([data-ds-dark-theme]) .plt-backup{border-color:rgba(96,106,122,.42);background-color:rgba(96,106,122,.09);color:#3c434e}
-body:not([data-ds-dark-theme]) .plt-backup:hover{border-color:rgba(96,106,122,.56);background-color:rgba(96,106,122,.15)}
-body:not([data-ds-dark-theme]) .plt-backup.is-on{border-color:rgba(96,106,122,.82);background-color:rgba(96,106,122,.26);color:#1b212b}
-body:not([data-ds-dark-theme]) .plt-backup:focus-within{outline-color:rgba(96,106,122,.62)}
-body:not([data-ds-dark-theme]) .plt-backup-box{border-color:rgba(96,106,122,.62)}
-body:not([data-ds-dark-theme]) .plt-backup-box:checked{border-color:#3c434e;background:#3c434e}
-/* 浅色勾选方块底是深灰蓝(#3c434e)，对勾必须换回白色（id=258 把深色那支改成了深墨色，
-   共用同一张 data-uri 的话在浅色里就是深墨压深灰蓝，几乎看不见）。 */
-body:not([data-ds-dark-theme]) .plt-backup-box:checked::after{background:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.6 6.2l2.2 2.2 4.6-4.6' fill='none' stroke='%23ffffff' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/9px 9px no-repeat}
 body:not([data-ds-dark-theme]) .plt-foot{color:#6a7280;opacity:1}
 body:not([data-ds-dark-theme]) .plt-empty{color:#59606c}
 /* 空组提示：深色下靠 opacity:.8 压暗，浅色下会直接糊掉，改成实色 + 图标稍亮。 */

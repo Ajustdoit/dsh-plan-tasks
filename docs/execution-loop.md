@@ -19,9 +19,10 @@
 ```
 用户点「开始」
   │
-  ├─ 客户端 60-tab.js:656  startWork()
-  │     ├─ 先试浏览器侧 kickoffViaClient(ctx, sessionId, text)       (60-tab.js:675)
-  │     └─ 不可用则回落  call('kickoff', { text })
+  ├─ 客户端 startWork()
+  │     ├─ call('dispatch', { dryRun, force }) 拿到与自动派发相同的正文
+  │     ├─ 先试浏览器侧 kickoffViaClient 把这段正文发进会话
+  │     └─ 发出去则 call('dispatch', { force, ack }) 只记账；否则由宿主 dispatch 代发
   │
   ├─ 宿主   api.js:819   API.kickoff({ ctx, sessionId, text })
   │     └─ ctx.get('sessionController').prompt(request, signal)
@@ -64,7 +65,7 @@
 | `queue-cli.js:73` `byQueueOrder(a, b)` | 队列比较器：order → 一级 id → children 后缀（`"12-C" - "12-A"` 是 NaN，必须显式比后缀） |
 | `queue-cli.js:83` `actionable(items)` | `actionableLeaves` + `byQueueOrder`，取第 0 条就是 `next` |
 | `queue-cli.js:137` `nextTask(items)` | **id=340**：返回第一个未执行的任务，外加 `{parentId, groupSize, groupRemaining, groupRemainingAfter, index}` |
-| `queue-cli.js:196` `snapshot(items)` | 输出 `{ remaining, next, group }`；`next` 里才带 `plan`（正文） |
+| `queue-cli.js` `ack(items, id)` | `done` / `fail` / `start` 只输出 `{ ok, id, remaining }`，不把下一条 `plan` 留进会话 |
 | `queue-cli.js:245` `applyQueueCommand(items, cmd, id, note)` | 纯函数：`start`/`done`/`fail` 改字段并返回新数组 |
 | `queue-cli.js:328` `main()` | 读 `.plan/plan.json` → apply → 原子写回（`tmp` + `rename`）→ 打印一行 JSON |
 
@@ -98,8 +99,10 @@ harness 侧**没有**「任务队列 / 批量投递」这类接口被插件用�
    派发挂在 turn 结束之后，任务之间必定有一次回答。
 3. **拆分组没有显式投递游标。** 现在一次只投一条（`groupRemaining` 只用于提示），
    组内顺序由 `byQueueOrder` 的后缀比较保证。342 要补「整组按顺序投 + 本地游标」。
-4. **去重靠 `dispatchedRef`（内存）。** 页面刷新后这个标记会丢，可能对同一条再派一次；
-   `start` 存在 `startedAt` 时已幂等，但「刚派出去还没开始跑」的窗口仍无持久记录。343 收口。
+4. ~~**派发 effect 和对账 effect 共用 `wasRunningRef`。**~~ **已修**：对账写在前面，
+   同一次提交里先把旗子写成 false，派发再也看不到 true→false，于是「做完不派下一条」。
+   派发改用 `wasDispatchRunningRef`。对账进行中改为等到 `reconcilingRef` 落下再发，不再直接丢掉边沿。
+   队首已在 `delivered` 且还没 `execute` 时 `dispatch` 返回 `reason:'inflight'`，不跳到后面的条目。
 5. **`.plan/q.mjs` 是副本。** `queue.js:23 ensureQueueCli` 每次 `read` 都会把模板覆盖写一遍，
    所以任何「改 q.mjs 的行为」都必须改 `lib/host/queue-cli.js`，不能改 `.plan/q.mjs`。
 
@@ -108,7 +111,7 @@ harness 侧**没有**「任务队列 / 批量投递」这类接口被插件用�
 | 任务 | 落点 |
 | --- | --- |
 | 342 组按队列投递 | 复用 `nextTask()` 的 `parentId` / `index` / `groupRemaining`，在 `settings.json` 或 `.plan/dispatch.json` 记 `cursor`；harness 无队列接口，因此是「按顺序逐条投递 + 本地游标」 |
-| 343 边界收口 | 已投递去重从内存搬到磁盘（用任务 id）；`api.cancel` 已有；「无可取任务 → 清运行态」由 `dispatch` 返回 `reason:'empty'` 处理 |
+| 343 边界收口 | 已投递记在 `.plan/dispatch.json`；队首未完成返回 `reason:'inflight'`（不跳条）；「无可取任务 → 清运行态」由 `dispatch` 返回 `reason:'empty'` 处理 |
 
 ## 参考
 

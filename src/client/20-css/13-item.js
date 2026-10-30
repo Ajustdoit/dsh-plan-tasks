@@ -80,26 +80,6 @@
    那条规则永远不会触发。.plt-root 有 container-type:size（id=152），
    这里和 17-input.js 的档位胶囊一样按容器宽度走。 */
 @container (max-width:320px){.plt-limit{max-width:84px;padding-right:20px}.plt-group-h{gap:6px}}
-/* 「裁剪前备份」复选开关（id=256）。
-   与 .plt-limit 并排出现在已审核组头，所以沿用同一套尺寸语言：
-   26px 高、8px 圆角、组 accent 系、字号 12px，两个控件看起来是一对。
-   自绘复选框而不是用浏览器默认：默认方块在深色面板上是刺眼的白，
-   在浅色下又几乎看不见边框（id=89 踩过同样的坑）。 */
-.plt-backup{flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;height:26px;box-sizing:border-box;padding:0 8px;border-radius:8px;border:1px solid rgba(var(--plt-accent),.28);background:rgba(var(--plt-accent),.1);color:var(--dsw-alias-label-secondary,#c8c8c8);font-size:12px;line-height:1;font-weight:500;letter-spacing:.02em;cursor:pointer;white-space:nowrap;user-select:none;transition:border-color .12s ease,background .12s ease,color .12s ease}
-.plt-backup:hover{border-color:rgba(var(--plt-accent),.46);background-color:rgba(var(--plt-accent),.17)}
-.plt-backup:focus-within{outline:2px solid rgba(var(--plt-accent),.5);outline-offset:1px}
-/* 勾上时整块转成实心强调：一眼能看出「现在会备份」，不用去数那个小方块。 */
-/* 勾选态整块转实心，但文字不染 accent（id=258）：深色下四组 accent 亮度差很多，
-   琥珀(255,180,60)与粉(236,72,153)压在 accent@.24 底上只有 4.18 / 3.50，
-   比平时更难读；保持中性亮色后四组都是 8.5~11.2，勾没勾上靠底色与方块区分就够了。 */
-.plt-backup.is-on{border-color:rgba(var(--plt-accent),.62);background-color:rgba(var(--plt-accent),.24);color:rgba(238,242,248,.98)}
-.plt-backup-box{flex:0 0 auto;width:13px;height:13px;margin:0;padding:0;box-sizing:border-box;appearance:none;-webkit-appearance:none;border-radius:4px;border:1.5px solid rgba(var(--plt-accent),.5);background:transparent;cursor:pointer;position:relative;transition:background .12s ease,border-color .12s ease}
-.plt-backup-box:checked{border-color:rgba(var(--plt-accent),.95);background:rgba(var(--plt-accent),.95)}
-/* 对勾用 data-uri 而不是伪元素字符：字符在不同字体下粗细不一，13px 里会糊。 */
-.plt-backup-box:checked::after{content:'';position:absolute;inset:0;background:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.6 6.2l2.2 2.2 4.6-4.6' fill='none' stroke='%23141a22' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/9px 9px no-repeat}
-.plt-backup-box:disabled{opacity:.5;cursor:default}
-.plt-backup-txt{flex:0 0 auto;line-height:24px}
-@container (max-width:320px){.plt-backup{padding:0 6px;gap:4px}.plt-backup-txt{display:none}}
 /* 组内自成滚动区：组头留在外面所以始终可见，条目在这一块里内滚动。
    左右各留 9px，条目不再顶着组的边框。 */
 .plt-group-body{display:flex;flex-direction:column;gap:6px;padding:8px 9px 9px;overflow:auto;flex:1 1 auto;min-height:0;scrollbar-width:thin;scrollbar-color:rgba(var(--plt-accent),.45) transparent}

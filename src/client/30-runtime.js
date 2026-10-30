@@ -183,20 +183,6 @@
       return rm === 0 ? `${hh}小时` : `${hh}小时${rm}分钟`
     }
 
-    /**
-     * 裁剪之后追在提示后面的「已备份」尾巴（id=257）。
-     *
-     * 宿主只有在真备份成功时才回 `backup`，所以这里不做任何猜测：
-     * 有就报一句，没有就当没这回事。提示文案统一由这一个函数生成，
-     * 免得「改上限」和「审核通过」两条路写出两种说法。
-     */
-    function backupSuffix(data) {
-      const backup = data?.backup
-      if (backup === null || backup === undefined) return ''
-      const name = typeof backup.path === 'string' && backup.path !== '' ? backup.path.split(/[\\/]/).pop() : ''
-      return name === '' ? ' · 已备份完整 JSON' : ` · 已备份到 ${name}`
-    }
-
     function fmtDate(iso) {
       if (typeof iso !== 'string' || iso === '') return ''
       const t = Date.parse(iso)
