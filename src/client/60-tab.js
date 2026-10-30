@@ -64,6 +64,10 @@
       const [pickedDraft, setPickedDraft] = React.useState(() => new Set())
       // 分组展开态：手风琴互斥，同一时刻只有一个组展开（null = 全部折叠）。
       // 也存 localStorage，刷新后保持。
+      // id=356：`null` 必须原样读回来。以前这里 `JSON.parse('null')` 得到 null 后
+      // 走到最后一行 `return 'todo'` —— 也就是「所有组都收起」这个合法状态，
+      // 一刷新 / 切页签重挂载就被翻译成「展开待执行」。审核完最后一条后正好会写进
+      // 这个状态，于是看起来就像「点通过之后自动跳到了待执行」。
       const [openGroup, setOpenGroupState] = React.useState(() => {
         try {
           const raw = window.localStorage.getItem(`dsh-plan-tasks:groups:${cwd || 'default'}`)
@@ -71,7 +75,10 @@
           const parsed = JSON.parse(raw)
           // 兼容旧版存的对象格式（{todo:true,...}），迁移成单个 key。
           if (typeof parsed === 'string') return parsed
-          if (parsed !== null && typeof parsed === 'object') {
+          // 「全部折叠」是一个真实的状态，不是「读不到」—— 直接返回 null，
+          // 不要让它掉进下面的兜底分支。
+          if (parsed === null) return null
+          if (typeof parsed === 'object') {
             const first = ['todo', 'unreviewed', 'reviewed'].find((key) => parsed[key] === true)
             return first ?? null
           }
@@ -120,13 +127,61 @@
       // id=341：这一轮结束后是否已经派过下一条。会话 running 会抖（工具调用之间也算空闲），
       // 没有这个标记就会在同一个空档里连派几条。只在真正发出请求时置位；定时器被清掉或请求失败要放回来。
       const dispatchedRef = React.useRef(false)
+      // id=379：「完成后暂停」当前值 —— 派发 effect 要用它做闸门。
+      //
+      // 为什么必须是 ref 而不是直接读 state：派发 effect 的依赖只有
+      // [agentRunning, sessionId, cwd]，它在**闭包里捕获的是那一次渲染的** pauseAfterDone。
+      // 用户在第一轮跑到一半时拨开关，effect 不会重跑（依赖没变），
+      // 于是它手里的还是旧值 —— 表现就是「拨了没用，下一条照样派出去」。
+      // 用 ref 存「当前值」，异步回调与定时器里读到的永远是最新那份。
+      // state 仍保留：界面渲染要用它触发重渲染。两者同源写入，见下面的 effect。
+      const pauseAfterDoneRef = React.useRef(false)
       // 已挂起（id=208）：只存内存，不写 plan.json。页面刷新后按「有未完成且无 turn 在跑」
       // 自然回落为「未开始」，不需要一个跨会话会失效的持久状态字段。
       const [paused, setPaused] = React.useState(false)
+      // id=377：「完成后暂停」开关 —— **本步只做 UI 结构与文案，状态源是占位变量**。
+      //
+      // 语义（题面）：开启后当前任务执行完不再自动派发下一个任务；关闭则继续自动派发。
+      //
+      // 为什么先只做占位：真正的拦截点在派发链路里（「这一轮结束后要不要派下一条」），
+      // 那里现在由 `dispatchedRef` + running 的边沿驱动，改动它属于另一件事；
+      // 本步先把控件、文案、显隐条件与可访问性落下来，让后续接上时不用再动结构。
+      //
+      // 命名就用 pauseAfterDone：与题面「完成后暂停」一一对应，
+      // 不叫 autoDispatch 的反面 —— 否定式的开关名最容易被读反。
+      const [pauseAfterDone, setPauseAfterDone] = React.useState(false)
+      // id=379：把 state 同步进 ref，供派发 effect 在异步回调里读最新值。
+      // 放在这里（state 声明旁边）而不是 effect 里，是为了「写入点只有一个」——
+      // 无论是点击切换、空闲复位、还是以后别处改它，都会经过同一个 setPauseAfterDone，
+      // 所以只要每次渲染同步一次就不会有落后的那一份。
+      // 注意：这只覆盖「渲染之后」的读取；点击那一刻到下一次渲染之间，
+      // 派发回调若正好跑起来读到的还是旧值 —— 下面 togglePauseAfterDone 里
+      // 会**同步**写一次 ref，把那个窗口也关掉。
+      // （ref 声明在这一段之前，见前面 pauseAfterDoneRef。）
+      // id=379：开关的唯一写入口。
+      //
+      // 为什么要一个函数而不是直接用 setPauseAfterDone：
+      //   1. 必须**同步**写 ref。React 的 setState 要等下一次渲染才生效，
+      //      而派发 effect 里的定时器回调可能在同一个事件循环之后立刻跑 ——
+      //      那时 state 还是旧值，读 state 会漏判。ref 是同步的，写进去立刻可见。
+      //   2. 拨回「继续执行」时，要**立刻**把被拦下的那一条派出去（题面要求），
+      //      不能等下一次 running 边沿 —— 那个边沿可能永远不会再来（已经空闲了）。
+      // 两个方向都走这里，「谁改了它」永远只有一处。
+      // 实现放在 dispatchNext 之后（见下方）—— 它要读 items / runningCount / sync /
+      // dispatchNext，全都声明在组件更下面，写在这里会 TDZ。
+
       // 上一次列表数据的指纹，用来跳过「内容没变」的重渲染。
       const lastSignatureRef = React.useRef('')
       // 展开中的条目的正文 / 备注：列表只拿 lite 数据，展开时才按需取全文。
       const [detail, setDetail] = React.useState(null)
+      // 可用模型目录 + 当前生效的选择（id=363）。挂载时立刻拉一次，
+      // 所以「初始化完成」就等于「已经有一个可用模型」，不必先跑一条任务。
+      const [modelState, setModelState] = React.useState({ providers: [], selection: null })
+      // 「确实没有可用模型」（id=364）：只在 ensureModel 判定目录真的空时才置位。
+      // 与「模型列表还没就绪」区分开 —— 后者会被等待 + 重试消化掉，不该弹任何东西。
+      const [modelMissing, setModelMissing] = React.useState(false)
+      // 「正在重新加载模型列表」：用户点引导按钮时的忙碌态，避免连点。
+      const [modelLoading, setModelLoading] = React.useState(false)
 
       // 输入框草稿 / 展开项 / 自动刷新开关 / 草稿模式 / 深入模式 / 拆解模式，任何一项变化都落一次本地存储。
       React.useEffect(() => {
@@ -154,11 +209,6 @@
         },
         [],
       )
-
-      const refresh = React.useCallback(async () => {
-        const data = await run(() => call('read', payload))
-        return data
-      }, [run, sessionId, cwd])
 
       // 静默重读：不置 busy、不动 loading，避免自动刷新时按钮闪烁/输入被打断。
       // 自动刷新走 lite 模式：备注正文不进轮询载荷（历史备注占整份 json 七成体积），
@@ -259,6 +309,93 @@
         }
       }, [sessionId])
 
+      // —— 可用模型列表：初始化阶段就拉一次（id=363）——
+      //
+      // 原来这对数据只在「真发一次拆解请求」时才被问起，而宿主那边的
+      // 路由来自 `session.requestHeader()` —— 会话一次请求都还没发过时它是 undefined，
+      // 于是全新会话的第一次拆解必然报 no-route。用户唯一的绕法就是
+      // 「先随便发条消息，再回来拆解」，这正是题面要拆掉的那条隐式依赖。
+      //
+      // 现在提到挂载阶段：面板一出现就拉目录，拿不到显式选择时立刻落一次默认，
+      // 并把这笔写回状态。这样「初始化完成」就等于「模型可用」。
+      //
+      // 几个刻意的选择：
+      // 1. **不挂进 `run()`**：那个是写型操作的忙碌壳子，会把整块面板置成 busy，
+      //    第一屏就闪一下按钮禁用很难看。这里静默做，失败也不弹错 ——
+      //    模型目录读不出来时，其余所有功能（增删改、审核、执行）都还能用。
+      // 2. **只落一次默认**：判据是 `saved`（用户/上一轮显式存下的选择），
+      //    不是 `selection`（那个永远有值）。拿 selection 判断的话，
+      //    「自动选中的默认项」会被当成用户的选择，默认兜底就再也不触发了。
+      // 3. **不覆盖用户已选的**：`saved` 只要在目录里就一个字都不改。
+      // 4. 依赖只有 sessionId / cwd：会话切了就重新解析一遍，因为请求头是按会话来的。
+      React.useEffect(() => {
+        let alive = true
+        void (async () => {
+          let snapshot
+          try {
+            snapshot = await call('models', payload)
+          } catch {
+            return /* 目录读不出来：静默跳过，不打扰用户 */
+          }
+          if (!alive || snapshot === null || snapshot === undefined) return
+          setModelState({ providers: Array.isArray(snapshot.providers) ? snapshot.providers : [], selection: snapshot.selection ?? null })
+          // id=365：上次选的模型已经不在目录里了（下架 / 换 provider）。
+          // 宿主那边已经把失效值按 null 处理，下面这段回写就是愈合动作本身。
+          // 这里额外说一句，是因为「我明明选过，怎么变了」必须有解释 ——
+          // 静默替换成默认模型会让人以为自己的选择被吞了。
+          if (snapshot.stale === true) {
+            const to = snapshot.selection === null ? null : snapshot.selection.model
+            setNotice(to === null ? '上次选的模型已失效，当前没有可用模型' : `上次选的模型已失效，已改用 ${to}`, NOTICE_LONG_MS)
+          }
+          // 已经有显式选择（且在目录里）就什么都不做 —— 用户的决定优先。
+          if (snapshot.saved !== null && snapshot.saved !== undefined) return
+          const fallback = snapshot.selection ?? null
+          if (fallback === null) return
+          try {
+            const written = await call('selectModel', { ...payload, provider: fallback.provider, model: fallback.model })
+            if (alive) setModelState((prev) => ({ ...prev, selection: written?.selection ?? fallback }))
+          } catch {
+            /* 写不回也不影响这一次的可用性：selection 已经在手里了 */
+          }
+        })()
+        return () => {
+          alive = false
+        }
+      }, [sessionId, cwd])
+
+      /**
+       * 「重新加载模型列表」（id=364）。
+       *
+       * 只在「确实没有可用模型」的提示里出现。用户的处境通常是「刚配好 key / 刚连上
+       * provider，面板还没刷新」—— 那时正确的动作不是让他重开页面，而是就地重试。
+       *
+       * 重试成功就顺手把默认落盘并收起提示；仍然失败则保留提示，让用户接着排查
+       * （提示文案里已经写明「没配」还是「读不出来」两种情况）。
+       */
+      const reloadModels = React.useCallback(async () => {
+        if (modelLoading) return
+        setModelLoading(true)
+        try {
+          const snapshot = await call('models', payload)
+          const picked = snapshot?.selection ?? null
+          setModelState({ providers: Array.isArray(snapshot?.providers) ? snapshot.providers : [], selection: picked })
+          if (picked === null) return
+          setModelMissing(false)
+          if (snapshot.saved === null || snapshot.saved === undefined) {
+            try {
+              await call('selectModel', { ...payload, provider: picked.provider, model: picked.model })
+            } catch {
+              /* 写不回不影响可用性 */
+            }
+          }
+          setNotice(`已加载模型 ${picked.model}`, NOTICE_LONG_MS)
+        } catch {
+          setNotice('模型列表仍然读不出来，检查一下 provider 配置', NOTICE_LONG_MS)
+        } finally {
+          setModelLoading(false)
+        }
+      }, [modelLoading, sessionId, cwd])
+
       const items = state.data?.items ?? []
 
       // 状态兜底：模型已经开始干活，但还没把 startedAt 写进 plan.json 的那几秒，
@@ -279,6 +416,50 @@
       // 现在统一交给 statusOf，两边不可能再对不上。
       // id=233：statusOf 把 interrupted 排在 running 之前，所以被中断的条目不会再被数进来。
       const runningCount = items.filter((it) => statusOf(it, impliedRunningId === it.id).key === 'running').length
+
+      // id=378：「完成后暂停」在进入空闲（无执行中任务）时复位为默认「继续执行」。
+      //
+      // 为什么复位方向是 false：
+      //   pauseAfterDone 的语义是「这一轮跑完之后先别派下一条」，是一个**针对当前这一轮**
+      //   的临时决定，不是长期偏好 —— 任务跑完、界面回到空闲，那次决定的对象已经不存在了。
+      //   留着 true 的话，下次开工会在用户毫无察觉的情况下停在第一条之后，
+      //   症状是「点了开始，只跑了一条就不动了」，而且极难联想到是上一次那个开关没复位。
+      //   所以默认值（继续自动派发）才是安全落点：漏派可以点一下补上，
+      //   而「以为会继续却停了」会让人以为程序坏了。
+      //
+      // 判据用 runningCount 与 agentRunning —— 与「正在执行 N 条」那句、
+      // 组头 data-running、以及开关自身的显隐条件同一个口径，不另算一套。
+      //
+      // 只在「从有到无」的**边沿**动作，且要求这段空闲稳定持续满 PAUSE_RESET_IDLE_MS：
+      //   1. 边沿 —— 空闲期间每次 sync 都会重算，若不加边沿判断，会在空闲时反复写 state；
+      //   2. 宽限 —— 会话的 running 在**工具调用之间**会短暂变 false（id=341 就为此
+      //      专门用 dispatchedRef 挡连派）。一看到空闲就复位，一条跑十几步工具的任务
+      //      会在第二个工具调用处被悄悄清掉：用户明明开着「完成后暂停」，它半路自己关了。
+      //      这正是本步最容易写错的地方 —— 判据「看起来」是同一个 runningCount，
+      //      但「瞬时为空」与「真的空闲」是两件事。
+      //      所以起一个定时器，到点前又忙起来就取消（cleanup 里 clear）。
+      //
+      // 首次观测（wasBusy === null）不动作：页面刚加载时本来就没人跑，
+      // pauseAfterDone 还是初值 false，没有需要复位的东西。
+      const pauseIdleRef = React.useRef(null)
+      React.useEffect(() => {
+        const busyNow = agentRunning === true || runningCount > 0
+        const wasBusy = pauseIdleRef.current
+        pauseIdleRef.current = busyNow
+        // 首帧：只记下这一帧，不动作（没人跑，也不该复位任何东西）。
+        if (wasBusy === null) return undefined
+        // 还在忙：把上一轮的定时器清掉（返回 undefined 会让 React 走 cleanup）。
+        if (busyNow === true) return undefined
+        // 从忙到闲：等宽限到点。期间又忙起来的话，本次 effect 的 cleanup 会取消它。
+        // id=379：复位也走 ref —— 否则 state 变 false、ref 还停在 true，
+        // 下一条永远派不出去（闸门读的是 ref）。
+        if (wasBusy !== true) return undefined
+        const timer = window.setTimeout(() => {
+          pauseAfterDoneRef.current = false
+          setPauseAfterDone(false)
+        }, PAUSE_RESET_IDLE_MS)
+        return () => window.clearTimeout(timer)
+      }, [agentRunning, runningCount])
 
       // 当前「写着 startedAt 但还没完成」的条目 id：中断时要落盘成「已中断」的就是它们。
       // 放在这里而不是 pauseWork 里头算，是因为暂停的收尾阶段列表可能已被 sync 换过一轮。
@@ -370,7 +551,8 @@
         }
       }, [working])
 
-      // 开始 / 暂停 的可用性（id=208）：只由「有没有待办 / 是否在跑 / 有没有挂起」三个既存事实推导，
+      // 开始 / 暂停 这颗合成按钮的可用性（id=208，id=354 合并）：
+      // 只由「有没有待办 / 是否在跑 / 有没有挂起」三个既存事实推导，
       // 不另存一份状态，否则四个来源迟早对不上。
       const pendingCount = items.filter((it) => it.execute !== true && it.draft !== true).length
       // 「已挂起」= 主动暂停过，且此刻确实没在跑。pause 请求刚发出、turn 还没停下时仍算执行中。
@@ -387,12 +569,13 @@
       // 面板自己不产生计划状态 —— 模型用 `.plan/q.mjs` 改 plan.json，宿主把结果写盘，
       // 页签要看见就必须有人去读。谁在读：
       //   1. 这里：auto 打开时每 5 秒静默 `sync()` 一次，是**唯一**的周期性读盘；
-      //   2. 用户手点「刷新」；
-      //   3. 切回前台 / 窗口聚焦 / pageshow / 会话由空闲翻成执行中各补一次（下方三个 effect），
+      //   2. 切回前台 / 窗口聚焦 / pageshow / 会话由空闲翻成执行中各补一次（下方三个 effect），
       //      但都只补**一次**，不是周期。
-      // 所以删掉这段 = 模型干完活面板不动，用户得自己一直点刷新。要改只能改间隔或
+      // 所以删掉这段 = 模型干完活面板不动，用户只能重开页签。要改只能改间隔或
       // 触发方式，不能用「看起来没人用」为理由整段移除。
-      // 关闭 auto 时（用户点顶栏那个按钮）定时器清掉、倒计时显示 0 —— 那是用户显式选择手动刷新。
+      // id=357：顶栏那颗手点「刷新」的按钮已经移除 —— 上一版这里还写着「用户手点刷新」，
+      // 现在手动刷新的唯一手段就是下面这个 auto 开关（关掉后靠 2 里的几个时机补读）。
+      // 关闭 auto 时定时器清掉、倒计时显示 0 —— 那是用户显式选择不自动读盘。
       React.useEffect(() => {
         if (!auto || !visible) {
           if (!auto) setTick(0)
@@ -558,6 +741,63 @@
       }
 
       /**
+       * 确保「现在能用某个模型」（id=364）。
+       *
+       * 拆解是唯一真调模型的入口，所以这道校验只挂在这里。它要解决的是三件事，
+       * 而原来的实现（如果 `modelState.selection` 为空就直接拦）三件都做错：
+       *
+       * 1. **空值 ≠ 没配模型**。`modelState.selection` 只是「上一轮拉到的结果」，
+       *    首次挂载的那一小段时间它必然是 null（请求还在飞）。直接拦会造成
+       *    「第一次点拆解被拦、等两秒再点就好了」的时序坑。所以先**等**一次，
+       *    再**重试**一次目录请求（`call('models')`），而不是拿一个还没就绪的
+       *    本地快照当结论。
+       * 2. **拿得到就不该拦**。按 已有选择 > 默认模型 > 列表首个 的优先级挑一个
+       *    （宿主侧 `model-route.js` 的解析链已经就是这个顺序，这里只是消费它），
+       *    挑到了就继续拆，不再弹「没有选择模型」。
+       * 3. **真的一个都没有才提示，并且给可点的出路**。目录为空 / 全部 provider 都
+       *    探测失败时，提示里要说清是「没配」还是「读不出来」，并给一个「重新加载
+       *    模型列表」的按钮 —— 只告诉用户「不行」而没有下一步，是这个提示最糟的形态。
+       *
+       * @returns {Promise<{provider:string, model:string}|null>} 可用路由；null 表示确实没有
+       */
+      const ensureModel = React.useCallback(async () => {
+        // 先看手里这份快照：初始化 effect 已经拉过一次，命中就不用再问。
+        if (modelState.selection !== null && modelState.selection !== undefined) return modelState.selection
+        // 快照是空的：可能是「还没就绪」，也可能是「真的没有」。
+        // 给初始化那一次请求一点时间落地（它和本函数几乎同时发出），再自己问一次 ——
+        // 这就是题面说的「等待或重试一次」。
+        for (let attempt = 0; attempt < MODEL_READY_ATTEMPTS; attempt += 1) {
+          if (attempt > 0) await new Promise((resolve) => window.setTimeout(resolve, MODEL_READY_GAP_MS))
+          let snapshot
+          try {
+            snapshot = await call('models', payload)
+          } catch {
+            continue // 这一次读失败：还有下一次
+          }
+          const picked = snapshot?.selection ?? null
+          if (picked !== null) {
+            // 顺手把这个结果记进状态：后面的气泡提示与按钮文案都读它。
+            setModelState({ providers: Array.isArray(snapshot.providers) ? snapshot.providers : [], selection: picked })
+            // 首次拿到默认值时也落一次盘，下次打开直接命中（和初始化 effect 同一套判据）。
+            if (snapshot.saved === null || snapshot.saved === undefined) {
+              try {
+                await call('selectModel', { ...payload, provider: picked.provider, model: picked.model })
+              } catch {
+                /* 写不回不影响这一次能不能拆 */
+              }
+            }
+            return picked
+          }
+          // 目录读到了但是没有可用项：不用再重试，重试也不会变出模型来。
+          if (Array.isArray(snapshot?.providers)) {
+            setModelState({ providers: snapshot.providers, selection: null })
+            return null
+          }
+        }
+        return null
+      }, [modelState.selection, sessionId, cwd])
+
+      /**
        * 拆解模式提交：交给宿主收集项目快照 → 一次 LLM → 写成 N 条。
        * 落在哪一组看右侧「草稿」开关：点亮 → 草稿组；没点亮 → 直接进待执行。
        * 宿主会做幂等（同一句话重复提交不会产生重复条目）与原子写。
@@ -569,11 +809,22 @@
           setState((prev) => ({ ...prev, error: '要拆解的内容不能为空' }))
           return
         }
+        // 入口校验（id=364）：先确保有模型可用，再动手。
+        // 注意顺序 —— 放在 `setSplitting(true)` **之前**：模型都还没定就不要先挂遮罩，
+        // 否则「确实没有模型」时用户会先看到一个转圈、再看到一个失败，白等一场。
+        const route = await ensureModel()
+        if (route === null) {
+          // 走到这里说明目录是真的空（或者全部 provider 都探测失败）。
+          // 提示带上「重新加载」按钮 —— 有出路比说清楚更重要。
+          setModelMissing(true)
+          return
+        }
+        setModelMissing(false)
         // 拆解落点跟着「草稿」开关走，整段只取一次快照，避免异步期间开关被改。
         const toDraft = draftMode === true
         setSplitting(true)
         setState((prev) => ({ ...prev, error: '' }))
-        setNotice('正在按项目情况拆解…')
+        setNotice(`正在按项目情况拆解…（模型 ${route.model}）`)
         try {
           const data = await call(
             'decompose',
@@ -860,6 +1111,104 @@
        * 失败只记一条提示，不弹错误弹窗：派发失败最多是「停在原地」，用户再点一次开始即可，
        * 不该盖掉屏幕上更重要的内容。
        */
+      /**
+       * id=379：派发下一条的**唯一实现**。原来是内联在 effect 定时器里的匿名 async，
+       * 现在抽出来，因为「拨回继续执行时立即恢复派发」需要走同一条路径 ——
+       * 复制一份出来的话，两处会各自演化（一边补了 inflight 重试、一边忘了），
+       * 而它们做的事完全一样：让宿主算下一条、发进会话、把结果说给用户听。
+       *
+       * 入参只有一句用于提示的前缀，其余全部读当前闭包 / ref 的最新值。
+       * 传 ref 而不是值：这个函数可能在 setTimeout 里跑，captured 的旧值会漏判。
+       */
+      const dispatchNext = React.useCallback(
+        async (lead, epoch) => {
+          // 换会话、用户暂停、或会话又跑起来：这次空档不算「回答结束」。
+          // id=379：**加上「完成后暂停」闸门** —— 这是本步的核心。
+          // 用 ref 读，不用 state：这里跑在 setTimeout 回调里，
+          // 闭包里的 state 可能已经是几秒前的旧值（用户中途拨了开关）。
+          const still = () =>
+            (epoch === undefined || dispatchEpochRef.current === epoch)
+            && pausedByUserRef.current !== true
+            && agentRunningRef.current !== true
+            && pauseAfterDoneRef.current !== true
+          const deadline = Date.now() + DISPATCH_SETTLE_MS
+          while (reconcilingRef.current === true && Date.now() < deadline) {
+            if (!still()) return
+            await new Promise((resolve) => window.setTimeout(resolve, 100))
+          }
+          if (!still()) {
+            // 被「完成后暂停」拦下时要说一句，否则用户只看到任务停了、没有任何解释。
+            // 其他情况（换会话 / 暂停 / 又跑起来）本来就有各自的提示或天然可见的状态，不重复。
+            if (pauseAfterDoneRef.current === true) {
+              setNotice('已完成，按「完成后暂停」停在空闲；拨回「继续执行」可继续派发', NOTICE_LONG_MS)
+            }
+            return
+          }
+          if (dispatchedRef.current === true) return
+          dispatchedRef.current = true
+          try {
+            let data = null
+            for (let attempt = 0; attempt <= DISPATCH_INFLIGHT_RETRIES; attempt += 1) {
+              if (!still()) {
+                dispatchedRef.current = false
+                return
+              }
+              data = await call('dispatch', { ...payload })
+              if (epoch !== undefined && dispatchEpochRef.current !== epoch) {
+                dispatchedRef.current = false
+                return
+              }
+              if (data === null || typeof data !== 'object') {
+                dispatchedRef.current = false
+                return
+              }
+              if (data.reason !== 'inflight') break
+              if (attempt === DISPATCH_INFLIGHT_RETRIES) break
+              await new Promise((resolve) => window.setTimeout(resolve, DISPATCH_INFLIGHT_GAP_MS))
+            }
+            if (data === null || typeof data !== 'object') {
+              dispatchedRef.current = false
+              return
+            }
+            if (data.dispatched !== true) {
+              // 没发出去就要允许下一次 true→false 再派。卡在 true 上，队列会一直停。
+              dispatchedRef.current = false
+              if (data.reason === 'empty') {
+                // id=343：正常收工。把这一轮留下的运行态一起收掉，否则顶栏会停在
+                // 「干活中 / 继续」上，而队列其实已经空了 —— 用户只能靠刷新页面摆脱它。
+                setPaused(false)
+                pausedByUserRef.current = false
+                setNotice(data.finished === true ? '待办已清空，本轮执行结束' : '本轮执行结束', NOTICE_LONG_MS)
+                void sync()
+              } else if (data.reason === 'inflight') {
+                const id = data.taskId === null || data.taskId === undefined ? '' : String(data.taskId)
+                setNotice(
+                  id !== '' ? `上一条 ${id} 还没回填完成，暂不派发下一条` : '上一条还没回填完成，暂不派发下一条',
+                  NOTICE_LONG_MS,
+                )
+                void sync()
+              }
+              return
+            }
+            // 用长提示：成功派发是这条链还在走的唯一可见信号，短提示容易被下一帧盖掉。
+            setNotice(
+              lead !== undefined && lead !== ''
+                ? `${lead}：${data.taskId}`
+                : data.redelivered === true ? `重新派发：${data.taskId}` : `已派发下一条：${data.taskId}`,
+              NOTICE_LONG_MS,
+            )
+            // 派出去之后立刻读一次，让新条目的「执行中」状态尽快出现。
+            void sync()
+          } catch (error) {
+            dispatchedRef.current = false
+            setNotice(`派发下一条失败：${error instanceof Error ? error.message : String(error)}`, NOTICE_LONG_MS)
+          }
+        },
+        // payload / sync / setPaused 都是每次渲染重建的稳定闭包（或 state setter），
+        // 不列全也不会读到过期的关键量：判定全部走 ref。
+        [payload, sync],
+      )
+
       React.useEffect(() => {
         const was = wasDispatchRunningRef.current
         wasDispatchRunningRef.current = agentRunning === true
@@ -874,80 +1223,64 @@
         let started = false
         const timer = window.setTimeout(() => {
           started = true
-          void (async () => {
-            // 换会话、用户暂停、或会话又跑起来：这次空档不算「回答结束」。
-            const still = () =>
-              dispatchEpochRef.current === epoch
-              && pausedByUserRef.current !== true
-              && agentRunningRef.current !== true
-            const deadline = Date.now() + DISPATCH_SETTLE_MS
-            while (reconcilingRef.current === true && Date.now() < deadline) {
-              if (!still()) return
-              await new Promise((resolve) => window.setTimeout(resolve, 100))
-            }
-            if (!still()) return
-            if (dispatchedRef.current === true) return
-            dispatchedRef.current = true
-            try {
-              let data = null
-              for (let attempt = 0; attempt <= DISPATCH_INFLIGHT_RETRIES; attempt += 1) {
-                if (!still()) {
-                  dispatchedRef.current = false
-                  return
-                }
-                data = await call('dispatch', { ...payload })
-                if (dispatchEpochRef.current !== epoch) {
-                  dispatchedRef.current = false
-                  return
-                }
-                if (data === null || typeof data !== 'object') {
-                  dispatchedRef.current = false
-                  return
-                }
-                if (data.reason !== 'inflight') break
-                if (attempt === DISPATCH_INFLIGHT_RETRIES) break
-                await new Promise((resolve) => window.setTimeout(resolve, DISPATCH_INFLIGHT_GAP_MS))
-              }
-              if (data === null || typeof data !== 'object') {
-                dispatchedRef.current = false
-                return
-              }
-              if (data.dispatched !== true) {
-                // 没发出去就要允许下一次 true→false 再派。卡在 true 上，队列会一直停。
-                dispatchedRef.current = false
-                if (data.reason === 'empty') {
-                  // id=343：正常收工。把这一轮留下的运行态一起收掉，否则顶栏会停在
-                  // 「干活中 / 继续」上，而队列其实已经空了 —— 用户只能靠刷新页面摆脱它。
-                  setPaused(false)
-                  pausedByUserRef.current = false
-                  setNotice(data.finished === true ? '待办已清空，本轮执行结束' : '本轮执行结束', NOTICE_LONG_MS)
-                  void sync()
-                } else if (data.reason === 'inflight') {
-                  const id = data.taskId === null || data.taskId === undefined ? '' : String(data.taskId)
-                  setNotice(
-                    id !== '' ? `上一条 ${id} 还没回填完成，暂不派发下一条` : '上一条还没回填完成，暂不派发下一条',
-                    NOTICE_LONG_MS,
-                  )
-                  void sync()
-                }
-                return
-              }
-              // 用长提示：成功派发是这条链还在走的唯一可见信号，短提示容易被下一帧盖掉。
-              setNotice(data.redelivered === true ? `重新派发：${data.taskId}` : `已派发下一条：${data.taskId}`, NOTICE_LONG_MS)
-              // 派出去之后立刻读一次，让新条目的「执行中」状态尽快出现。
-              void sync()
-            } catch (error) {
-              dispatchedRef.current = false
-              setNotice(`派发下一条失败：${error instanceof Error ? error.message : String(error)}`, NOTICE_LONG_MS)
-            }
-          })()
+          void dispatchNext(undefined, epoch)
         }, DISPATCH_SETTLE_MS)
         return () => {
           // 请求已经发出就别清：prompt 会把 running 拉回 true，cleanup 若把结果扔掉，
           // 下一条其实发出去了，面板却没有任何「已派发」提示。
           if (!started) window.clearTimeout(timer)
         }
-      }, [agentRunning, sessionId, cwd])
+      }, [agentRunning, sessionId, cwd, dispatchNext])
+
+      /**
+       * id=379：「完成后暂停」开关的唯一写入口。放在 dispatchNext 之后定义 ——
+       * 它要读 items / runningCount / sync / dispatchNext，全都声明在组件更上面或这一段之前。
+       *
+       * 为什么不直接用 setPauseAfterDone：
+       *   1. 必须**同步**写 ref。setState 要等下一次渲染，而派发那边的定时器回调
+       *      可能在同一个事件循环之后立刻跑 —— 那时 state 还是旧值，读 state 会漏判。
+       *   2. 拨回「继续执行」时，要**立刻**把被拦下的那一条派出去（题面要求），
+       *      不能等下一次 running 边沿 —— 那个边沿可能永远不会再来（已经空闲了）。
+       */
+      const togglePauseAfterDone = () => {
+        const next = pauseAfterDone !== true
+        pauseAfterDoneRef.current = next
+        setPauseAfterDone(next)
+        if (next === true) {
+          // 拨到「暂停」：不中断当前任务，只是这一轮结束后不派下一条。
+          setNotice('当前任务完成后将暂停，不再自动派发下一条', NOTICE_LONG_MS)
+          return
+        }
+        // 拨回「继续执行」。题面条件：仍有待执行任务 + 当前无执行中任务 → 立即恢复派发。
+        //
+        // 「无执行中」用与别处同一套判据（agentRunning / starting / runningCount）。
+        // 有任务在跑时**不动作**：它跑完后那个 running 边沿会自然派下一条，
+        // 现在多发一次反而会插队。
+        const idleNow = agentRunning !== true && starting !== true && runningCount === 0
+        if (idleNow !== true) return
+        // 「还有待执行」的判据必须与分组口径一致（todoList 那段），否则会出现
+        // 「组里看得见一条，拨开关却说没活可派」。
+        // 注意这里**不能**用渲染闭包里的 batchOf（它定义在下方 JSX 里，此处不可见），
+        // 所以就地按同一个口径重算：批次看「是不是全做完了」，单条看 execute。
+        // 两处口径一旦分叉，症状是「拨回继续执行但什么都没发生」——
+        // 而 toggle 这边恰恰是唯一会被用户当成「开关坏了」的地方，宁可写得直白些。
+        const hasTodo = items.some((it) => {
+          if (it.draft === true) return false
+          const kids = Array.isArray(it.children) ? it.children : []
+          if (kids.length > 0) return kids.every((c) => c.execute === true) !== true
+          return it.execute !== true
+        })
+        if (hasTodo !== true) return
+        // 放开闸门，让 dispatchNext 的 `dispatchedRef === true` 早退不再拦住这一次。
+        // 不自己拼 dispatch 请求：那条链路上的 inflight 重试、empty 收工、
+        // 游标推进全在 dispatchNext 里，绕开它就是第二套实现。
+        dispatchedRef.current = false
+        // 等一个派发空档再发：与 running 边沿那条同速，避免刚拨开关就抢在
+        // 状态落定之前把请求打出去。
+        window.setTimeout(() => {
+          void dispatchNext('用户已恢复自动派发')
+        }, DISPATCH_SETTLE_MS)
+      }
 
       /** 拖拽落位：只在「待执行」组内调整先后，随后整表重排并落盘。 */
       // 提交一整份「待执行组」的 id 顺序：Host 只认整表顺序，
@@ -1081,17 +1414,20 @@
             return { ...prev, data: { ...prev.data, items: list } }
           })
           const reviewed = value.review === true
-          // 审核完这一条后「待审核」是否已经空了：
-          // 空了就把这一组自动折叠起来（不再赖在展开态占着整个面板）。
+          // 审核完这一条后「待审核」是否已经空了。
+          // id=356：空了也**不折叠**这一组 —— 用户点的是「通过」，不是「切换页面」。
+          // 折叠会让整个列表当场消失（看起来就像被踢到别的组去了），
+          // 留在原位、由组自己的空态文案（「暂无待审核内容」）说明结果更清楚；
+          // 什么时候收起来、什么时候点别的组，交给用户。
           const remainingUnreviewed = (state.data?.items ?? []).filter(
             (it) => it.execute === true && it.review !== true && it.id !== id,
           ).length
           if (reviewed && remainingUnreviewed === 0) {
             setOpenId(null)
-            if (openGroup === 'unreviewed') setOpenGroup(null)
           } else if (reviewed && nextUnreviewed !== null) {
             setOpenId(nextUnreviewed)
-            // 分组可能是折叠的，展开项在折叠组里看不见，顺手把它展开。
+            // 展开下一条仍在「待审核」组内，属于原位推进；分组若被手工收起，顺手展开它。
+            // 注意这里**只**展开 unreviewed，绝不碰 'todo'。
             setOpenGroup('unreviewed')
           }
           if (!silent) {
@@ -1149,6 +1485,79 @@
         }
       }
 
+      /**
+       * 整批通过入口（id=354 建按钮，id=355 落实为批量操作）：
+       * 拆解批次头部那颗「通过」只发一个 id 进来，**整批**的审核在这里一次做完。
+       *
+       * 为什么不是「对每条子任务循环发 update」（上一版的做法）：
+       *   十条子任务 = 十次请求、十次抢锁、十次写盘；中途失败会留下「审了一半」
+       *   的中间态，界面上父行会在「待审核 / 已审核」之间抖 N 次。
+       * 现在只发一次 `approveBatch`：宿主在**同一把锁、同一次读写**里把父 + 全部
+       * children 一起置为已审核（形态由 `approveItem` 生成，与逐条点通过完全一致），
+       * 再按既有归档规则把整批搬进 notes.json。要么全成、要么一条都不动。
+       *
+       * 失败时不做乐观更新：磁盘没改动，界面就不该先跳到「已审核」。
+       */
+      const approveBatch = async (id) => {
+        const parent = items.find((it) => String(it.id) === String(id))
+        if (parent === undefined) return
+        const kids = Array.isArray(parent.children) ? parent.children : []
+        // 与宿主同一口径：父自己的 review 是容器标记，也要算进「还剩几条没审」。
+        // 两边各算一套的话，极端情况下（子任务都审过、父没落标记）按钮会显示可点，
+        // 而宿主其实无事可做 —— 所以判据只写这一种。
+        //
+        // id=372：`one.review` 前先挡脏数据。kids 里混进 null / 字符串时
+        // （手改 plan.json、旧版本写坏的数组），`one.review` 会抛
+        // `Cannot read properties of null` —— 用户点「通过」看到的是失败提示，
+        // 而真正该做的是照常把能审的审掉。宿主侧 approveItem 也已同步加固。
+        const pool = (kids.length > 0 ? [parent, ...kids] : [parent]).filter((one) => one !== null && typeof one === 'object')
+        const pendingCount = pool.filter((one) => one.review !== true).length
+        if (pendingCount === 0) {
+          setNotice('这一批已经全部审核过了')
+          return
+        }
+        setBusy(true)
+        setState((prev) => ({ ...prev, error: '' }))
+        try {
+          const data = await call('approveBatch', { ...payload, id: parent.id })
+          const approvedCount = Number(data?.approvedCount ?? 0)
+          setPicked((prev) => {
+            // 这一批里被审掉的子任务若还留在勾选集合里，一并清掉。
+            if (prev.size === 0) return prev
+            const next = new Set(prev)
+            // id=372：同一个脏数据防护 —— 这里的 kids 可能含 null。
+            for (const one of kids) {
+              if (one !== null && typeof one === 'object') next.delete(one.id)
+            }
+            next.delete(parent.id)
+            return next.size === prev.size ? prev : next
+          })
+          setNotice(`整批已通过 ${approvedCount > 0 ? approvedCount : pendingCount} 条`)
+          // id=356：通过之后这一批离开「待审核」，但**不切换分组**。
+          // 以前这里在整组清空时 setOpenGroup(null)（全部折叠），而这种「收起」状态
+          // 在重挂载时会被读成默认的待执行组 —— 用户看到的就是「点通过后跳去待执行」。
+          // 现在什么都不动：组留在原位，用空态文案说明「暂无待审核内容」。
+          // 唯一的例外是展开项还指向这一批里的某条（它已经不在这组了）：只清展开项。
+          setOpenId((prev) => {
+            if (prev === null) return prev
+            // id=372：同上，`one.id` 前挡脏数据。
+            const gone = kids.some((one) => one !== null && typeof one === 'object' && String(one.id) === String(prev)) || String(prev) === String(parent.id)
+            return gone ? null : prev
+          })
+          // 写回后必须重新读一次：分组、条数、以及头部那颗「通过」的可见性
+          // （statusOf 已经算成 reviewed → 按钮不再渲染）都从磁盘这份数据推导，不另存状态。
+          await sync()
+        } catch (error) {
+          setState((prev) => ({
+            ...prev,
+            error: `整批通过失败：${error instanceof Error ? error.message : String(error)}`,
+          }))
+          await sync()
+        } finally {
+          setBusy(false)
+        }
+      }
+
       /** 批量审核：把勾选的待审核项一次性全部通过。 */
       const approvePicked = async (ids) => {
         if (ids.length === 0) {
@@ -1165,14 +1574,9 @@
           }
           setPicked(new Set())
           setNotice(`已批量审核通过 ${done} 条`)
-          // 批量通过后「待审核」清空了，就把这一组折叠起来，别占着整个面板。
-          const remaining = (state.data?.items ?? []).filter(
-            (it) => it.execute === true && it.review !== true && !ids.includes(it.id),
-          ).length
-          if (remaining === 0) {
-            setOpenId(null)
-            if (openGroup === 'unreviewed') setOpenGroup(null)
-          }
+          // id=356：批量通过后**不折叠、不切换分组**（同单条通过的取舍）。
+          // 只把展开项从「这一批已经离开的条目」上摘掉，其余状态一律不动。
+          setOpenId((prev) => (prev !== null && ids.some((id) => String(id) === String(prev)) ? null : prev))
           await sync()
         } catch (error) {
           setState((prev) => ({
@@ -1279,7 +1683,7 @@
         { className: 'plt-root', ref: rootRef, style: { position: 'relative' } },
         h(
           'div',
-          // has-error（id=210）：让顶栏两个按钮跟着错误提示一起描红，操作失败时不用靠猜。
+          // has-error（id=210）：让顶栏那颗「开始 / 暂停」跟着错误提示一起描红，操作失败时不用靠猜。
           { className: state.error === '' ? 'plt-top' : 'plt-top has-error' },
           h('span', { className: 'plt-title' }, `任务列表 · ${items.length}`),
           // 提交/审核的提示放在「自动刷新」左侧，不再占用下方空间。
@@ -1297,67 +1701,101 @@
             ),
             h('span', null, auto ? `${tick}s` : '自动'),
           ),
-          // 开始 / 暂停（id=207 渲染，id=208 接逻辑）：插在「自动刷新」与「刷新」之间，
-          // 即口语需求说的「任务列表右边、倒计时左边」。两个按钮都沿用 .plt-btn 的标签结构
-          // （inline-flex + 图标 + 文字），与刷新按钮视觉同族。
-          // 可用性全部由 canStart / canPause 推导（见上方 working 一带），不在别处另存状态：
-          //   未开始 → 开始可点、暂停禁用；执行中 → 反过来；已挂起 → 开始变「继续」、暂停禁用；
-          //   全部完成（无待办）→ 两个都禁用；busy（有请求在飞）→ 两个都禁用。
-          h(
-            'button',
-            {
-              className: `plt-btn plt-start${pausedIdle ? ' is-resume' : ''}`,
-              disabled: canStart !== true,
-              'data-tip':
-                pendingCount === 0
+          // 开始 / 暂停（id=207 渲染，id=208 接逻辑，id=354 合成一个按钮）：
+          // 插在「自动刷新」与「刷新」之间，即口语需求说的「任务列表右边、倒计时左边」。
+          // 原先并排两颗按钮、靠 disabled 让它们互斥，题面要求「显示一个就行」——
+          // 现在同一个位置只渲染一颗，身份由「会话是不是真的在跑」决定：
+          // 在跑 → 暂停；其余 → 开始 / 继续（开工指令在飞时显示「发送中…」）。
+          // 这样「同一时刻只有一个可见动作」是结构上的事实，而不是靠两个 disabled 拼出来；
+          // 图标、文案、onClick 都由同一个 showPause 决定，不可能出现文字与动作对不上。
+          // 可用性仍然只由 canStart / canPause 推导（见上方 working 一带），不另存状态：
+          //   未开始 → 开始可点；执行中 → 暂停可点；已挂起 → 文案变「继续」；
+          //   全部完成（无待办）→ 开始禁用；busy（有请求在飞）→ 禁用。
+          (() => {
+            // showPause 只看「会话真的在跑」（agentRunning），不看 working：
+            // working 还包含「开工指令刚发出、还没送到」的 starting 那几秒，
+            // 那几秒画成「暂停」既不可点（pauseWork 会自己 return），
+            // 又会让按钮在「开始」→「暂停」之间闪一下。这段时间继续留在「开始」上，
+            // 文案换成「发送中…」并转圈，和列表底部那颗行内按钮的语义一致。
+            // pausing 也算进来：点下暂停到 turn 真停下之间，按钮得继续显示「暂停中」，
+            // 否则 `working` 还在、`agentRunning` 先翻下去的那一帧会闪回「开始」。
+            const showPause = agentRunning === true || pausing === true
+            const sending = showPause !== true && starting === true
+            const pausingNow = showPause && pausing === true
+            const enabled = showPause ? canPause === true : canStart === true
+            const tip = showPause
+              ? pausingNow
+                ? '正在挂起当前执行，请稍候'
+                : '挂起当前执行，已完成的进度会保留'
+              : sending
+                ? '正在把开工指令发进会话，稍候片刻'
+                : pendingCount === 0
                   ? '没有待执行的计划'
                   : pausedIdle
                     ? '从挂起处继续队首这条计划，已完成的不会重做'
-                    : `把队首任务发进会话（按钮「${KICKOFF_TEXT}」），模型不用再自己找下一条`,
-              onClick: (e) => {
-                e.stopPropagation()
-                void startWork()
-              },
-            },
-            h(PlayIcon, { size: 12 }),
-            h('span', null, pausedIdle ? '继续' : '开始'),
-          ),
-          h(
-            'button',
-            {
-              className: 'plt-btn plt-pause',
-              disabled: canPause !== true,
-              'data-tip': working ? '挂起当前执行，已完成的进度会保留' : '当前没有正在执行的任务',
-              onClick: (e) => {
-                e.stopPropagation()
-                void pauseWork()
-              },
-            },
-            pausing ? h(SpinnerIcon, { size: 12 }) : h(PauseIcon, { size: 12 }),
-            h('span', null, pausing ? '暂停中' : '暂停'),
-          ),
-          h(
-            'button',
-            { className: 'plt-btn plt-refresh', disabled: busy, 'data-tip': '立即重新读取 plan.json', onClick: refresh },
-            // 转圈位（id=196/197/198）：图标默认静止（spin:false 只画圆弧、不自带动画），
-            // 转不转完全由这里的状态类决定。两类互斥，切换时容器尺寸不变、不重排。
-            //   spinning = 这一次读写请求在飞（busy） 或 模型正在干活（working）
-            //   idle     = 两者皆无
-            // 注意不要接静默自动刷新（sync 不置 busy），否则每 5 秒图标都要抖一下。
-            h(
-              'span',
+                    : `把队首任务发进会话（按钮「${KICKOFF_TEXT}」），模型不用再自己找下一条`
+            return h(
+              'button',
               {
-                className: `plt-refresh-ico${busy || working ? ' spinning' : ' idle'}`,
-                'aria-hidden': 'true',
-                'data-busy': busy ? 'true' : 'false',
-                'data-working': working ? 'true' : 'false',
+                className: showPause
+                  ? 'plt-btn plt-pause'
+                  : `plt-btn plt-start${pausedIdle ? ' is-resume' : ''}`,
+                // 给测试 / 排查一个稳定的定位点：同一颗按钮，多种身份。
+                'data-act': showPause ? 'pause' : sending ? 'sending' : pausedIdle ? 'resume' : 'start',
+                disabled: enabled !== true,
+                'data-tip': tip,
+                onClick: (e) => {
+                  e.stopPropagation()
+                  void (showPause ? pauseWork() : startWork())
+                },
               },
-              h(SpinnerIcon, { size: 12, spin: false }),
-            ),
-            h('span', { className: 'plt-refresh-label' }, '刷新'),
-          ),
+              showPause
+                ? pausingNow
+                  ? h(SpinnerIcon, { size: 12 })
+                  : h(PauseIcon, { size: 12 })
+                : sending
+                  ? h(SpinnerIcon, { size: 12 })
+                  : h(PlayIcon, { size: 12 }),
+              h('span', null, showPause
+                ? pausingNow ? '暂停中' : '暂停'
+                : sending ? '发送中…' : pausedIdle ? '继续' : '开始'),
+            )
+          })(),
         ),
         state.error !== '' ? h('div', { className: 'plt-err' }, state.error) : null,
+        // 「确实没有可用模型」的引导条（id=364）。
+        //
+        // 只在这一种情况下出现：ensureModel 已经等过、重试过，目录仍然是空的。
+        // 「列表还没就绪」不会走到这里 —— 那个被等待 + 重试消化掉了。
+        //
+        // 文案里刻意把两种成因分开说（没配 vs 读不出来），因为下一步动作不同：
+        // 前者要去配 provider，后者多半是 key / 端点的问题。
+        // 右侧给一个可点的「重新加载」—— 用户刚配好就回到面板是最常见的场景，
+        // 让他重开页面是没必要的惩罚。
+        modelMissing
+          ? h(
+              'div',
+              { className: 'plt-guide', role: 'status' },
+              h(
+                'span',
+                { className: 'plt-guide-txt' },
+                modelState.providers.length === 0
+                  ? '没有可用的模型：这个部署还没有配置任何 provider。配好之后点右侧重新加载。'
+                  : '模型列表读不出来：provider 已配置但探测失败，检查 key / 端点后重新加载。',
+              ),
+              h(
+                'button',
+                {
+                  className: 'plt-btn plt-guide-btn',
+                  type: 'button',
+                  disabled: modelLoading,
+                  'data-tip': '重新拉一次可用模型列表',
+                  onClick: () => void reloadModels(),
+                },
+                modelLoading ? '加载中…' : '重新加载',
+              ),
+            )
+          : null,
         h(
           'div',
           { className: 'plt-list' },
@@ -1460,13 +1898,29 @@
                           // 挑一条顶到最前面，等于绕过拆解给出的执行顺序，用户看着也乱。
                           canPin: groupKey === 'todo' && (item.decomposeKey ?? '') === '',
                           onPinTop: () => void pinTop(item.id),
+                          // id=354：拆解批次头部的「整批通过」统一入口。
+                          // 只传 id，遍历 children 与收尾都在 approveBatch 里做 ——
+                          // 按钮本身保持哑组件，不自己算「这一批还剩几条」。
+                          onApproveBatch: (batchId) => void approveBatch(batchId),
                           // 草稿组专属：单条「转为待执行」+ 正文可直接编辑。
                           // 草稿组里的父节点给「转为待执行」：整批一起出草稿（宿主按 id 改父）。
                           onPromote: () => void moveToGroup([item.id], false),
                           // 待执行里还没开工的才允许退回草稿（执行中不给）。
                           // 父节点（拆解批次）不给「转为草稿」：它的草稿态是整批的落点，
                           // 单条父退回草稿要连带处理 children，宿主没有这个语义（id=273）。
-                          canDemote: groupKey === 'todo' && statusOf(item, impliedRunningId === item.id).key === 'todo' && !(Array.isArray(item.children) && item.children.length > 0),
+                          // 待执行里还没开工的条目可以退回草稿（执行中不给）。
+                          //
+                          // id=376：**去掉「批次不给」这条限制**。原来这里还要求
+                          // `!(item.children?.length > 0)` —— 也就是拆解批次不能转草稿。
+                          // 题面要求「拆分的与单任务都转到头部」，而这颗按钮要挪到头部，
+                          // 若继续排除批次，批次卡的头部就永远少一颗，两种卡的位置又不一致了。
+                          //
+                          // 放开是安全的：`moveToGroup` 打的是 `{ draft: true }`，
+                          // 而 `statusOf` 对父节点是「草稿优先」—— 整批被标 draft 后，
+                          // 即使子任务都做完了也判为草稿，不会被「整批做完 = 待审核」洗掉。
+                          // 子任务自己不带 draft（它们是父的一部分），所以不存在
+                          // 「父进了草稿、子还在待执行」的错位。
+                          canDemote: groupKey === 'todo' && statusOf(item, impliedRunningId === item.id).key === 'todo',
                           onDemote: () => void moveToGroup([item.id], true),
                           editable: groupKey === 'draft',
                           // 会话在跑但这条还没写 startedAt：先按「执行中」显示。
@@ -1542,6 +1996,51 @@
                               },
                               h('span', { className: 'plt-caret' }, h(CaretIcon, { size: 13 })),
                               h('span', { className: 'plt-group-name' }, group.title),
+                              // id=377：「完成后暂停」开关 —— 组头**左侧**、紧跟组名之后。
+                              //
+                              // 为什么放在这个位置而不是最右端：最右端已经被条数统计占着
+                              //（id=337 刻意压在所有控件之后，让各组的数字竖着对齐），
+                              // 往那里插一个宽度会变的开关，等于把那条对齐线打散。
+                              // 放在组名右侧，读起来是「干活中 · 完成后暂停」，一句话。
+                              //
+                              // 显隐（题面）：**只在「干活中」有任务正在执行时渲染**，
+                              // 无执行中任务时整块不显示。判据用 isRunning（与组容器上
+                              // 那个 data-running、以及收起态那句「正在执行」同一个口径），
+                              // 不另算一套，否则会出现「组头说在跑、开关却不出现」的矛盾。
+                              //
+                              // 文案：关闭态「完成后暂停」，开启态「继续执行」。
+                              // 开启后说的不再是「要不要暂停」而是「接下来会怎样」——
+                              // 开关已经拨过去了，再重复一遍动作没有信息量。
+                              //
+                              // title（题面要求逐字）：解释这个开关到底做什么。
+                              // 同时也用 data-tip —— 这个插件的气泡提示统一走 40-tip.js，
+                              // 只有 title 的话悬停要等浏览器那个 ~1s 的延迟。
+                              group.key === 'todo' && isRunning
+                                ? h(
+                                    'button',
+                                    {
+                                      className: `plt-auto-pause${pauseAfterDone ? ' on' : ''}`,
+                                      type: 'button',
+                                      // 组头整行是展开/收起的热区，开关必须自己吃掉点击。
+                                      // id=379：走统一写入口 —— 它同步写 ref（派发回调读的是 ref），
+                                      // 并在拨回「继续执行」时立刻恢复派发。
+                                      onClick: (e) => {
+                                        e.stopPropagation()
+                                        togglePauseAfterDone()
+                                      },
+                                      title: '开启后当前任务执行完不再自动派发下一个任务，关闭则继续自动派发',
+                                      'data-tip': '开启后当前任务执行完不再自动派发下一个任务，关闭则继续自动派发',
+                                      'aria-label': '完成后暂停',
+                                      // 读屏要的是「当前是开还是关」，不能只靠文案变化
+                                      //（「完成后暂停 / 继续执行」两种文案都不是 on/off 本身）。
+                                      'aria-pressed': pauseAfterDone === true,
+                                    },
+                                    // 小圆点承担开关状态：与顶栏那颗「自动刷新」（.plt-auto .plt-dot）
+                                    // 同一套视觉语言 —— 亮起 = 开，灰点 = 关。不新造一个 toggle 皮肤。
+                                    h('span', { className: 'plt-dot', 'aria-hidden': 'true' }),
+                                    h('span', { className: 'plt-auto-pause-txt' }, pauseAfterDone ? '继续执行' : '完成后暂停'),
+                                  )
+                                : null,
                               // id=337：条数统计挪到组头最右端（所有控件之后），
                               // 读数固定补足三位（001 / 012 / 123）—— 组与组之间同一位置、
                               // 同一宽度，展开收起时右边界不会跟着数字位数来回跳。
@@ -1832,9 +2331,18 @@
                               disabled: busy || splitting,
                               'aria-pressed': splitMode ? 'true' : 'false',
                               'aria-label': '拆解模式（叠加开关，可与其他任务类型同时生效）',
-                              'data-tip': splitMode
-                                ? `拆解模式已开启：发送时按项目情况自动拆成多条，落在「${draftMode ? '草稿' : '待执行'}」（点击关闭）`
-                                : `开启拆解模式：发送时按项目情况把这段话拆成几条${draftMode ? '草稿' : '待执行任务'}`,
+                              // id=363：气泡里带上「这一拆会用哪个模型」。拆解是唯一真调模型的动作，
+                              // 而模型的选择以前完全不可见 —— 用户只能靠「拆出来才知道」。
+                              // 目录还没回来（modelState.selection 为 null）时这句不出现，
+                              // 不写「未知模型」那种更吓人的占位。
+                              'data-tip': (() => {
+                                const who = modelState.selection === null
+                                  ? ''
+                                  : `（模型 ${modelState.selection.model}）`
+                                return splitMode
+                                  ? `拆解模式已开启：发送时按项目情况自动拆成多条，落在「${draftMode ? '草稿' : '待执行'}」${who}（点击关闭）`
+                                  : `开启拆解模式：发送时按项目情况把这段话拆成几条${draftMode ? '草稿' : '待执行任务'}${who}`
+                              })(),
                               onClick: () => setSplitMode(!splitMode),
                             },
                             h('span', { className: 'plt-chip-ico' }, h(SplitIcon, { size: 13 })),

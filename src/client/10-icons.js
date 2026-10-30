@@ -372,13 +372,14 @@
     }
 
     /**
-     * 执行中用的转转圈图标：一段圆弧匀速旋转，比文字更直观。
-     * `spin: false` 时只画圆弧、不挂动画类 —— 给「刷新」按钮那种由外层状态类
-     * 决定何时开始转的场景用，避免图标自带动画和父容器的状态类抢着控制。
+     * 执行中用的转圈图标：一段圆弧匀速旋转，比文字更直观。
+     *
+     * 只保留「一直转」这一种形态：顶栏那颗手点「刷新」的按钮连同它的
+     * spinning / idle 状态类已经移除（id=357），而它是唯一需要「由外层决定何时转」
+     * 的调用点。留着 `spin` 参数只会是一个没人传的开关，读代码的人还得猜它什么时候会被用上。
      */
     function SpinnerIcon(props) {
       const size = typeof props?.size === 'number' && props.size > 0 ? props.size : 12
-      const spinning = props?.spin !== false
       return h(
         'svg',
         {
@@ -391,7 +392,7 @@
           strokeWidth: 2.6,
           strokeLinecap: 'round',
           'aria-hidden': 'true',
-          className: spinning ? 'plt-spin' : undefined,
+          className: 'plt-spin',
           style: { display: 'block', flex: '0 0 auto' },
         },
         h('path', { d: 'M12 3.2a8.8 8.8 0 1 1-8.8 8.8', opacity: 0.95 }),

@@ -45,8 +45,14 @@
 /* 类型只用图标：去掉左右多余留白，跟输入栏胶囊里的图标一致。 */
 .plt-tag.type{display:inline-flex;align-items:center;justify-content:center;padding:0 5px;line-height:18px}
 .plt-tag.type svg{display:block}
-.plt-tag.reviewed{background:rgba(156,163,175,.16);color:#c3c9d4;border-color:rgba(156,163,175,.4)}
-.plt-tag.unreviewed{background:rgba(255,180,60,.14);color:#e9ae4a;border-color:rgba(255,180,60,.34)}
+/* id=358：「已审核」的徽标样式已随节点一起删除 —— 已审核组里每条都必然已审核，
+   分组位置已经把状态说清楚，右端再挂一个最长的词只会挤标题。
+   id=368：「待审核」同理，一起删。两条分支现在都返回 null（见 50-item.js 的
+   status.key 判断），这里若还留着规则就是死样式 —— 而 dead-css.mjs 抓不到它
+   （它只认 .plt- 前缀，.plt-tag.unreviewed 会被记成 plt-tag），
+   所以必须手动删，不能指望脚本报错。
+   仍然保留的 .plt-tag.*：draft / todo / failed / interrupted / running ——
+   这几种状态在组内不一致（同组里各条状态不同），徽标才有信息量。 */
 .plt-tag.draft{background:rgba(52,190,110,.14);color:#7fdca4;border-color:rgba(52,190,110,.36)}
 .plt-body{padding:2px 12px 12px 28px;border-top:1px solid var(--dsw-alias-border-secondary,rgba(255,255,255,.07))}
 .plt-sec{margin-top:9px}
@@ -103,6 +109,37 @@
 .plt-icon-btn.plt-trash:hover:not(:disabled){background:rgba(212,106,106,.14);border-color:rgba(212,106,106,.6)}
 /* 触屏上热区再放大一点（26px 的高度在手指下偏小），不影响桌面布局。 */
 @media (hover:none){.plt-icon-btn{width:40px;height:32px}}
+/* 条目头部右侧的删除图标（id=359 建，id=374 扩到待执行）：复用 .plt-icon-btn + .plt-trash
+   的尺寸与配色，这里只补两件头部特有的约束：
+   1. flex:0 0 auto —— .plt-name 是 flex:1 1 auto，图标不能参与标题的伸缩；
+   2. 头部只有 20px 行高（.plt-btn 的 line-height），而图标按钮是 26px 高，
+      用 align-self:center 让它以标题行中线为基准居中，不把整行撑高 6px。
+      高度仍用 26px：与底部那排按钮保持同一块可点面积，鼠标不必重新校准。
+   id=374 补第 3 条：它现在要跟「通过」主按钮（.plt-head-pass，圆角 8px、
+   主色实心底）并排站在标题行右端，两者高度必须齐。图标按钮是 26px，
+   主按钮 line-height 18 + 上下 padding 5×2 + 描边 2 = 30px —— 差 4px。
+   用 align-self:center 各自居中后视觉中线是对齐的（不靠撑高整行纠正），
+   所以这里**不再额外改高度**：一改就把上面第 2 条的取舍推翻，
+   底部那排的 26px 也会失去参照。 */
+.plt-head-del{flex:0 0 auto;align-self:center;margin-left:2px}
+/* 条目头部的「转为草稿」（id=376）：从底部操作排搬到标题行，排在垃圾桶左边。
+   视觉沿用底部那颗描边胶囊（与 .plt-promote 同款视觉；原来那条共用的
+   demote 规则已按 id=376 删除，这里是它唯一的宿主），只补头部特有的三件事：
+   1. flex:0 0 auto —— 与删除图标同理，不能参与标题伸缩；
+   2. align-self:center + 与图标同高 26px：这一行右端现在是「通过（30px）→
+      转草稿 → 垃圾桶（26px）」并排，三者各自居中后视觉中线对齐；
+      26px 这个高度是跟着 .plt-icon-btn 定的，不是另起一套；
+   3. 右边界与垃圾桶之间留 2px（margin-right），与 head-del 的 margin-left
+      一起构成两颗按钮之间的固定间距，不依赖父容器的 gap。
+   窄屏（≤320px）再收一档字号与内距：头部本来就挤，先保标题不被压没。 */
+.plt-head-demote{flex:0 0 auto;align-self:center;display:inline-flex;align-items:center;height:26px;padding:0 10px;margin-right:2px;border-radius:999px;border:1px solid rgba(var(--plt-accent),.55);background:transparent;color:rgba(var(--plt-accent),1);font-size:12px;line-height:1;font-weight:500;white-space:nowrap;cursor:pointer;transition:background .15s ease,border-color .15s ease,color .15s ease,opacity .12s ease}
+.plt-head-demote:hover:not(:disabled){background:rgba(var(--plt-accent),.14);border-color:rgba(var(--plt-accent),.8)}
+.plt-head-demote:active:not(:disabled){transform:translateY(.5px)}
+.plt-head-demote:disabled{opacity:.45;cursor:default}
+.plt-head-demote:disabled:hover{background:transparent;border-color:rgba(var(--plt-accent),.55)}
+@container (max-width:320px){.plt-head-demote{font-size:11px;padding:0 8px}}
+/* 触屏档：图标按钮在 @media (hover:none) 里会变 40×32，这里不能再覆盖它的宽度，
+   否则「触屏热区更大」的既有约定会被头部这一处破例。 */
 .plt-del{margin-left:auto;color:#d46a6a;border-color:rgba(212,106,106,.35)}
 /* 删除键已经收进 .plt-actions，靠右由容器负责，这里不能再 margin-left:auto，否则会把同组的「转为待执行」推开。 */
 .plt-checks .plt-actions .plt-del{margin-left:0}`)

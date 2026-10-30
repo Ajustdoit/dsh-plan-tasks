@@ -65,6 +65,25 @@
 }
 .plt-group-run svg{flex:0 0 auto}
 .plt-group-run-txt{overflow:hidden;text-overflow:ellipsis}
+/* id=377：「完成后暂停」开关（组头左侧、紧跟组名）。只在「干活中」渲染。
+   视觉语言直接借用顶栏那颗「自动刷新」（.plt-auto）：小圆点亮起 = 开、灰点 = 关，
+   胶囊描边同款。不新造 toggle 皮肤 —— 同一个侧栏里出现两种开关长相，
+   用户还得先分辨「这两个是不是一回事」。
+   与 .plt-auto 的区别只有两处，都是组头特有的：
+   1. 不写 min-width —— .plt-auto 固定 62px 是为了让「自动刷新 / 已暂停」换字时
+      顶栏不跳；这里的两种文案（5 字 / 4 字）相差 1 个字，给个 min-width 反而
+      让它在窄屏里多占地，组头比顶栏更挤。
+   2. flex:0 0 auto + nowrap —— 组头高度固定 38px，绝不能被压成两行。
+   颜色跟着本组的 --plt-accent 走（与 .plt-group-run 一致），
+   这样待执行组是粉调、别的组是蓝调，开关不会突然变成另一种主色。 */
+.plt-auto-pause{flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;justify-content:center;font-variant-numeric:tabular-nums;white-space:nowrap;padding:2px 8px;border-radius:999px;border:1px solid var(--dsw-alias-border-secondary,rgba(255,255,255,.16));background:transparent;color:var(--dsw-alias-label-caption,#9a9a9a);font-size:11.5px;line-height:16px;font-weight:500;cursor:pointer;transition:color .12s ease,border-color .12s ease,background .12s ease}
+.plt-auto-pause .plt-dot{width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-label-caption,#8a8a8a);flex:0 0 auto;transition:background .12s ease,box-shadow .12s ease}
+.plt-auto-pause:hover{border-color:rgba(var(--plt-accent),.42);color:rgba(var(--plt-accent),.95)}
+.plt-auto-pause.on{color:rgba(var(--plt-accent),1);border-color:rgba(var(--plt-accent),.45)}
+.plt-auto-pause.on .plt-dot{background:#4caf50;box-shadow:0 0 0 2px rgba(76,175,80,.18)}
+/* 组头本来就窄：360px 以下只留圆点，文案交给 title/aria-label。
+   与 .plt-group-run 同一条断点、同一套取舍 —— 两个控件在同一行里必须一起让位。 */
+@container (max-width:360px){.plt-auto-pause{padding:2px 6px}.plt-auto-pause-txt{display:none}}
 /* 组头本来就窄：320px 以下把「正在执行」缩成只有转圈，靠 title/aria-label 说明。
    必须用 @container —— @media 量的是视口，侧栏拖窄时窗口还是宽的。 */
 @container (max-width:360px){.plt-group-run{max-width:20px;gap:0}.plt-group-run-txt{display:none}}

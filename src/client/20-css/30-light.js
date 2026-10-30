@@ -83,7 +83,8 @@ body:not([data-ds-dark-theme]) .plt-notice{background:rgba(34,150,70,.10);border
 body:not([data-ds-dark-theme]) .plt-auto.on{color:#1a5db8;border-color:rgba(26,93,184,.45)}
 /* 开始 / 暂停（id=207）浅色态：深色主题那两档 hover 底色在白底上偏灰，
    换成饱和一点的绿 / 橙，并把文字压深 —— 白底上 .plt-btn 的继承色足够，
-   但 hover 时底色变浅会显得字发飘，所以显式钉一次。 */
+   但 hover 时底色变浅会显得字发飘，所以显式钉一次。
+   id=354 起两者互斥渲染，同一条规则只会命中屏幕上唯一那颗按钮。 */
 body:not([data-ds-dark-theme]) .plt-start:not(:disabled):hover{background:rgba(34,150,84,.12);border-color:rgba(28,124,62,.46);color:#14663a}
 body:not([data-ds-dark-theme]) .plt-pause:not(:disabled):hover{background:rgba(216,120,32,.12);border-color:rgba(176,94,20,.46);color:#8a4a0e}
 /* 开始 / 暂停的状态色（id=210）浅色态：深色主题的亮蓝 / 亮琥珀在 #fdfefe 上几乎看不见，
@@ -158,8 +159,8 @@ body:not([data-ds-dark-theme]) .plt-group-todo .plt-item.running .plt-name{color
 body:not([data-ds-dark-theme]) .plt-group-todo .plt-item.running .plt-tag.running{background:rgba(13,107,116,.14);color:#0d6b74;border-color:rgba(13,107,116,.4)}
 body:not([data-ds-dark-theme]) .plt-group-todo .plt-item.running .plt-tag.todo{background:rgba(31,111,208,.08);color:#1a60b6;border-color:rgba(31,111,208,.26)}
 body:not([data-ds-dark-theme]) .plt-group-todo .plt-group-count{background:rgba(31,111,208,.10);color:#1a60b6;border-color:rgba(31,111,208,.26)}
-body:not([data-ds-dark-theme]) .plt-tag.reviewed{background:rgba(120,130,145,.12);color:#5b6472;border-color:rgba(120,130,145,.41)}
-body:not([data-ds-dark-theme]) .plt-tag.unreviewed{background:rgba(200,140,20,.12);color:#7c5405;border-color:rgba(200,140,20,.48)}
+/* id=358 / id=368：浅色态的 .plt-tag.reviewed 与 .plt-tag.unreviewed 随节点一并删除
+   （这两个组里不再画状态徽标）。深色那侧同步删掉了，两边保持对称。 */
 body:not([data-ds-dark-theme]) .plt-tag.todo{background:rgba(120,130,145,.12);color:#5b6472;border-color:rgba(120,130,145,.41)}
 /* id=233「已中断」：与 id=228 给「待审核」定的琥珀同一族，但底色更浅一档 ——
    待审核是「干完了等人看」，已中断是「没干完等人续」，两者不该看起来一样重。 */
@@ -171,6 +172,20 @@ body:not([data-ds-dark-theme]) .plt-copy-btn{color:rgba(var(--plt-accent),1);bor
 body:not([data-ds-dark-theme]) .plt-copy-btn:hover{background:rgba(var(--plt-accent),.12);border-color:rgba(var(--plt-accent),.5);color:var(--dsw-alias-label-primary,#141a22)}
 body:not([data-ds-dark-theme]) .plt-copy-btn:disabled:hover{color:rgba(var(--plt-accent),1)}
 body:not([data-ds-dark-theme]) .plt-copy-btn.done{background:rgba(34,150,70,.12);border-color:rgba(34,150,70,.45);color:#116b36}
+/* id=373：头部「通过」在浅色下必须重新钉一次颜色。
+   这几条不是重复劳动 —— 上面 .plt-copy-btn 那组（id=226）是给**透明胶囊**写的：
+   color: accent 实色 + border-color: accent .32。头部那颗现在是实心主色块，
+   而 body:not([data-ds-dark-theme]) .plt-copy-btn:hover 的特异度 (0,3,0) 高于
+   .plt-head-pass:hover 的 (0,2,0) —— 不覆盖的话，白底主题下 hover 会把文字
+   刷成深蓝（label-primary）压在深蓝实心底上，几乎看不见。
+   所以这里把「白字 + 主色底 + 透明描边」按同样的特异度补一遍。
+   底面沿用 --dsw-alias-bg-accent：浅色主题里它已经是 #2f6fd0（白字对比 5.9:1），
+   不需要另设一个更深的蓝，也就不会和「发送」键分家。 */
+body:not([data-ds-dark-theme]) .plt-head-pass,
+body:not([data-ds-dark-theme]) .plt-head-pass:hover:not(:disabled),
+body:not([data-ds-dark-theme]) .plt-head-pass:active:not(:disabled),
+body:not([data-ds-dark-theme]) .plt-head-pass:disabled,
+body:not([data-ds-dark-theme]) .plt-head-pass:disabled:hover{background:var(--dsw-alias-bg-accent,#2f6fd0);border-color:transparent;color:#fff}
 
 /* —— 正在执行：浅底上把强度压到一半，绿色内阴影才不会糊成一块绿 —— */
 body:not([data-ds-dark-theme]) .plt-item.running{border-color:rgba(31,111,208,.33)}
@@ -223,7 +238,11 @@ body:not([data-ds-dark-theme]) .plt-item.plt-parent > .plt-head::before{backgrou
 body:not([data-ds-dark-theme]) .plt-item.plt-parent.open > .plt-head::before{background:rgba(var(--plt-accent),1)}
 body:not([data-ds-dark-theme]) .plt-kid{background:rgba(15,30,60,.028);border-color:rgba(20,40,70,.14)}
 body:not([data-ds-dark-theme]) .plt-kid:hover{background:rgba(15,30,60,.048);border-color:rgba(var(--plt-accent),.42)}
-body:not([data-ds-dark-theme]) .plt-kid-h .plt-id{color:#5f6672}
+/* id=361：子任务编号胶囊在浅底上要压深一档 —— 深色那条吃的是 accent 的 alpha
+   叠加，白底上会淡成一条看不清的小方块。文字用 bluish-700（与 .plt-id 同色阶），
+   底色/描边把 accent 的 alpha 提上去但不换色相，两套主题仍是同一族视觉。 */
+body:not([data-ds-dark-theme]) .plt-kid-code{color:#17559c;background:rgba(var(--plt-accent),.12);border-color:rgba(var(--plt-accent),.30)}
+body:not([data-ds-dark-theme]) .plt-kid-done .plt-kid-code{color:#5f6672;background:rgba(var(--plt-accent),.07);border-color:rgba(20,40,70,.16)}
 body:not([data-ds-dark-theme]) .plt-kid-note{color:#59606c}
 /* id=317：「已做的子任务」（id=316）在浅色下要逐项对齐 —— 深色那套吃的是
    rgba(255,255,255,.xx) 与 dsw 变量，白底上要么看不见、要么把字刷淡到读不清。
@@ -239,6 +258,15 @@ body:not([data-ds-dark-theme]) .plt-body.plt-body-parent{border-top-color:rgba(v
 /* id=240：收起态「正在执行」提示。深色那条吃的是 rgba(var(--plt-accent),.95)，
    浅色下四组 accent 已压深（id=226/228），alpha 再拉满一档到这里：不放白底上会发灰。 */
 body:not([data-ds-dark-theme]) .plt-group-run{color:rgba(var(--plt-accent),1)}
+/* id=377：「完成后暂停」开关的浅色态。
+   关闭态平时是灰字（走 label-caption），浅色下那颗 #9a9a9a 在白底上偏淡，
+   往深里压一档到 #59606c —— 与同组其它 caption 文字（.plt-group-count 等）同一个值，
+   这里不另设一个数。开启态的字/描边本来就吃 --plt-accent（浅色档已压深），
+   不用再覆盖；只把 hover 也钉一次，避免默认那条 .42 的描边在白底上糊掉。 */
+body:not([data-ds-dark-theme]) .plt-auto-pause{color:#59606c;border-color:rgba(20,40,70,.22)}
+body:not([data-ds-dark-theme]) .plt-auto-pause .plt-dot{background:#8b929c}
+body:not([data-ds-dark-theme]) .plt-auto-pause:hover{border-color:rgba(var(--plt-accent),.55);color:rgba(var(--plt-accent),1)}
+body:not([data-ds-dark-theme]) .plt-auto-pause.on{color:rgba(var(--plt-accent),1);border-color:rgba(var(--plt-accent),.55)}
 /* 上限下拉（id=190）：浅色下白底，深色那条 #1c1f24 的 option 底色要翻回来；
    箭头的 data-uri 是写死的中灰，浅色下偏淡，换一版深灰的图。
    底色仍走组自身的 --plt-accent（浅色档已审核是 96,106,122），只把透明度提一档，

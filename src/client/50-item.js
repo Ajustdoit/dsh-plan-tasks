@@ -10,7 +10,12 @@
      * 只读展示 + 每行一个「通过」，一个父批次里就能逐条审完。
      */
     function KidsList(props) {
-      const { kids, groupKey, busy, onPatch } = props
+      // id=371：不再接 `onPatch` 与 `busy` —— 它们此前唯一的用途是给
+      // 子任务行内那颗「单个通过」按钮（disabled + onClick）。按钮删掉之后
+      // 这两个 prop 就没有读者了，留着是「传了但没人用」的假接口：
+      // 后来的人会以为子任务行还能改点什么。
+      // `groupKey` 保留：耗时节点的显示条件还要用它（待审核/已审核才画）。
+      const { kids, groupKey } = props
       return h(
         'div',
         { className: 'plt-kids-list' },
@@ -18,9 +23,24 @@
           const status = statusOf(child)
           const durText = fmtDur(child.time)
           const note = String(child.note ?? '')
-          // id=322：children 行不再显示 `#id` —— 编号只在父/顶层行有意义（子任务不参与
-          // 拖拽、批量、复制提示词，命令行也只会指到父）。但 `data-id` 必须留着：
-          // 批量请求与验证脚本靠它定位具体那一条，去掉显示≠去掉身份。
+          // id=360/361：子任务编号（"2-A"）由宿主在读投影里派生好（store.js 的
+          // toLiteItem 与 api.js 的 detail 各给一份，见 docs/subtask-numbering.md），
+          // 这里只负责画，不再从 id 里切字符串 —— 同一个规则只留一份实现。
+          //
+          // 为什么不拼 `#`：顶层条目画的是 `#12`（半子任务行老格式的残留），
+          // 而拆解批次的父已经用「组」这个概念在带子任务了，`2-A` 连读就是「第 2 组 A 条」，
+          // 再加个 `#` 反而变成了两种记号混排。5-A 调研里也是把 `2-A` 当完整编号文本记的。
+          //
+          // 空值处理（题面要求）：`code` 为空串时**整个节点不渲染**，
+          // 也不留一个固定宽度的空槽 —— 手工新建的条目没有父子关系，
+          // 给它留编号位就等于凭空多出一段缩进，标题会比别的行短一截还找不到原因。
+          const codeText = String(child.code ?? '')
+          // id=322 曾把 children 行的编号整个删掉，理由是「子任务不参与拖拽 / 批量，
+          // 编号只在父行有意义」。id=361 把这个理由收回来一半：**身份还是要显示的**，
+          // 只是形状不同（窄胶囊，不是顶层那枚裸 `#id`），而且位置从「标题之前的最左端」
+          // 挪到了对勾之后 —— 编号是配角，不该抢占标题的起点。
+          // `data-id` 一直都留着（批量请求与验证脚本靠它定位具体那一条）：
+          // 去掉显示 ≠ 去掉身份，现在两者终于对上了。
           // id=316：已执行（做完，不论审没审）的子任务要一眼看出来 —— 与未执行项区分，
           // 但不削弱未执行项的强调。用 `.plt-kid-done` 而不是复用 status.key：
           // 「待审核」「已审核」两种都算做完，而它们在状态机里是两个不同的 key。
@@ -37,10 +57,31 @@
               doneKid
                 ? h('span', { className: 'plt-kid-check', 'aria-hidden': 'true' }, '✓')
                 : h('span', { className: 'plt-kid-check is-off', 'aria-hidden': 'true' }),
+              // 编号标签：在任务名称左侧、对勾之后（id=361）。
+              // 所有状态（待执行 / 待审核 / 已审核 / 执行中 / 失败…）都渲染同一个节点，
+              // 不做条件分支 —— 编号是身份，不是状态，状态一变编号就消失会让人对不上号。
+              // `code` 为空串时返回 null，DOM 里连元素都没有（题面：不留占位空隙）。
+              codeText !== ''
+                ? h(
+                    'span',
+                    {
+                      className: 'plt-kid-code',
+                      // 复制不了也点不了，只是视觉定位；读屏念一遍编号同样是有效信息。
+                      'data-tip': `编号 ${codeText}`,
+                    },
+                    codeText,
+                  )
+                : null,
               h(
                 'span',
                 { className: 'plt-kid-name', 'data-tip': `${child.name}\n\n${child.plan ?? ''}` },
-                child.name,
+                // id=362：省略号截断挪到内层 span 上，外层只当 flex 项。
+                // 原因是一个浏览器/规范细节：flex 项一旦带 overflow:hidden，
+                // 它的「基线」就不再取首行文字的基线，而是退回**底边**（inline-block
+                // 那条规则被套用到了 flex 项上）。于是上一行的 align-items:baseline
+                // 会把编号胶囊对齐到标题的底边 —— 看起来正是题面要避免的那种错位。
+                // 拆成两层后：外层 overflow 保持 visible（有真基线），内层负责截断。
+                h('span', { className: 'plt-kid-name-text' }, child.name),
               ),
               durText !== '' && (groupKey === 'unreviewed' || groupKey === 'reviewed')
                 ? h('span', { className: 'plt-dur', 'data-tip': `这条任务耗时 ${durText}` }, durText)
@@ -50,23 +91,14 @@
                 : null,
               // id=274：状态徽标只挂在父级行上（父行显示整批的聚合状态），
               // 子任务行不再重复一遍 —— 否则一屏里同一句话要说 N+1 次。
-              // 子任务自己的状态由行底色 / 左边框与「通过」按钮的可用性表达。
+              // 子任务自己的状态由行底色 / 左边框表达。
               status.key === 'running' ? h(SpinnerIcon, { size: 11 }) : null,
-              groupKey === 'unreviewed' && status.key !== 'running' && child.review !== true
-                ? h(
-                    'button',
-                    {
-                      className: 'plt-copy-btn plt-kid-pass',
-                      disabled: busy,
-                      'data-tip': '人工审核这一条的执行结果：标记为已通过',
-                      onClick: (e) => {
-                        e.stopPropagation()
-                        onPatch(child.id, { review: true })
-                      },
-                    },
-                    h('span', null, '通过'),
-                  )
-                : null,
+              // id=371：子任务行右侧那颗「单个通过」已删除。
+              // 理由：整批通过（父行头部那颗）已经是这条链路上的唯一入口 ——
+              // 同一份「标成已审核」的动作留两个入口（一个整批、一个逐条），
+              // 用户要自己判断「我该点哪个」，而两条路落盘后的形态完全一样。
+              // 删掉之后：子任务行只剩对勾 / 编号 / 标题 / 耗时 / 类型图标 / 执行中，
+              // 审核动作统一收到父行头部，与 6- 那批把「通过」搬到头部的方向一致。
             ),
             h('div', { className: 'plt-kid-plan' }, String(child.plan ?? '') || '（空）'),
             note !== ''
@@ -80,7 +112,7 @@
     }
 
     function Item(props) {
-      const { item, open, detail, onToggle, onPatch, onRemove, onFetchDetail, busy, dragging, dropTarget, onDragStart, onDragOver, onDrop, onDragEnd, dragEnabled, selectable, selected, onSelect, showExecute, showReview, groupKey, impliedRunning, canPin, onPinTop, onPromote, onDemote, canDemote, editable } = props
+      const { item, open, detail, onToggle, onPatch, onRemove, onFetchDetail, busy, dragging, dropTarget, onDragStart, onDragOver, onDrop, onDragEnd, dragEnabled, selectable, selected, onSelect, showExecute, showReview, groupKey, impliedRunning, canPin, onPinTop, onApproveBatch, onPromote, onDemote, canDemote, editable } = props
       // id=273：父节点（带 children 的拆解批次）只当容器 —— 它没有正文、不参与执行，
       // 标题行就只显示原始提示词标题（name 本身就是从 sourcePrompt 压出来的），
       // 展开后交给下面的子任务列表，父自己的「计划 / 备注」一块都不渲染。
@@ -110,7 +142,7 @@
       const canCopyId = true
       // 原始提示词的长度与正文：宿主有两种投影，必须两边都认。
       //   lite 列表（自动刷新 / 静默重读）→ 只给 sourcePromptLen，sourcePrompt 被抹成空串；
-      //   全量 read（首挂载、手点「刷新」）→ 直接给 sourcePrompt 全文，压根没有 sourcePromptLen。
+      //   全量 read（首挂载 / 会话切换那几次）→ 直接给 sourcePrompt 全文，压根没有 sourcePromptLen。
       // 早先这里只读 sourcePromptLen，于是首屏那一次渲染里「提示词」按钮整批消失、
       // 「提示词 → 通过」的顺序第一次画出来就是错的（id=194 联合回归抓到）。
       const sourceLen = Math.max(
@@ -129,8 +161,25 @@
       // 没有原始提示词的条目（手工提交的）直接不渲染按钮，而不是给一个点了没反应的空壳。
       const canCopyPrompt = groupKey !== 'draft' && sourceLen > 0
       const [copied, setCopied] = React.useState('')
-      // 「原始提示词」默认折叠：展开状态只活在这个卡片里，切走再回来重新收起。
-      const [sourceOpen, setSourceOpen] = React.useState(false)
+      // 「原始提示词」的展开状态。
+      //
+      // 默认值（id=375）：待执行组里的**拆解批次**默认展开，其余一律默认折叠。
+      //
+      // 为什么只放开待执行里的批次：
+      //  · 待执行是「接下来要干什么」的清单。批次卡展开后先是子任务列表、
+      //    再是这段原始提示词 —— 用户在这里最需要回头确认「当初是怎么要求的」，
+      //    好判断拆得对不对、要不要先改一版再执行。每次都要多点一下才能看到，
+      //    等于把最该在眼前的东西藏起来。
+      //  · 待审核 / 已审核不放开：那时活已经干完了，用户是来看结果的，
+      //    默认铺开一整段需求会把卡片撑得很长，反而盖住真正的执行结果。
+      //  · 单任务（无 children）不放开：它们没有子任务列表，展开区里就只剩这段原文，
+      //    默认展开等于把卡片直接变成两倍高，而标题已经压自同一段提示词，
+      //    信息是重复的。这条按题面「拆分的任务」的措辞，没有顺带扩大。
+      //
+      // 状态仍是本地 useState、仍可在卡片里手动收起/展开（按钮一字未改）。
+      // 只在初次挂载时取这个默认值：条目换组时（todo → unreviewed）是整棵子树
+      // 重新挂载（各组是独立容器），所以会按新组重新取默认，不会把旧状态带过去。
+      const [sourceOpen, setSourceOpen] = React.useState(groupKey === 'todo' && isParent === true)
       // 草稿就地编辑：editing = 是否展开编辑框，draftText = 编辑中的文本。
       // 编辑即保存：停止输入片刻就自动落盘，所以没有「保存」按钮；「取消」= 还原成进来时的原文。
       const [editing, setEditing] = React.useState(false)
@@ -325,6 +374,51 @@
           item.taskType === '仅回答' || item.taskType === '目标'
             ? h('span', { className: `plt-tag type plt-type-${item.taskType}`, 'data-tip': `任务类型：${item.taskType}` }, h(ModeIcon, { kind: item.taskType, size: 13 }))
             : null,
+          // id=354：拆解批次的**整组通过**。父行头部（状态标签左侧）在整批进入
+          // 「待审核」时给一颗「通过」；其余状态一颗都不画 —— 待执行还没结果可审、
+          // 已审核已经审完、草稿/执行中都不该出现这颗按钮，所以这里只认 status.key。
+          // 为什么放头部：一个批次展开后最长能铺十几条子任务，整批通过的操作要在
+          // 不展开、不滚动的状态下就能点到，行内尾部得先滚到底才看得见。
+          // 样式复用 .plt-copy-btn（与计划标题行那颗「通过」、子任务行内那颗同一套胶囊），
+          // 不新造视觉；只用一个 .plt-head-pass 承担「不参与标题伸缩」。
+          // 点击走统一入口 onApproveBatch(整批 id)：本组件不自己遍历子任务，
+          // 也不提供单条通过的第二个入口（单条仍由子任务行内那颗按钮负责）。
+          //
+          // id=368：**没有拆分的普通条目**在待审核时也搬到头部来（原来它藏在展开区里）。
+          // 理由与批次那条完全一样，只是「隐藏成本」更隐蔽：普通条目要看到「通过」
+          // 得先展开卡片 —— 而审核这件事恰恰不需要读正文，一眼扫过列表就能判断
+          // 「这条做完了没有」。放在头部之后，待审核组在收起状态下就是一张可逐条
+          // 点过的清单，不用展开、不用滚动。
+          // 两类条目共用同一个位置与同一套样式，用 isParent 分派动作：
+          //   批次 → onApproveBatch（一次改完整批）
+          //   普通 → onPatch({ review: true })（与原来展开区里那颗完全同一条通道，
+          //          连「自动展开下一条 / 清空后折叠分组」那套行为都原样保留）
+          // running 时两颗都不画：执行中还没有结果可审。
+          (isParent === true && status.key === 'unreviewed') || (isParent !== true && showReview === true && running !== true)
+            ? h(
+                'button',
+                {
+                  className: 'plt-copy-btn plt-head-pass',
+                  type: 'button',
+                  disabled: busy === true || (isParent !== true && item.review === true),
+                  'data-tip':
+                    isParent === true
+                      ? `整批通过：把这一批 ${kids.length} 条子任务一起标成已审核`
+                      : '人工审核这一条的执行结果：标记为已通过',
+                  'aria-label': isParent === true ? '整批通过' : '通过',
+                  onClick: (e) => {
+                    // 头部整行是展开/收起的热区，按钮必须自己吃掉点击。
+                    e.stopPropagation()
+                    if (isParent === true) {
+                      if (typeof onApproveBatch === 'function') onApproveBatch(item.id)
+                      return
+                    }
+                    onPatch({ review: true })
+                  },
+                },
+                h('span', null, '通过'),
+              )
+            : null,
           // 置顶（id=319 位置调整）：只有「待执行」组给，正在执行的那条不给（它本来就在最上面）。
           // 必须排在状态徽标**之前** —— 状态列要贴着行尾对齐（见 13-item.js 的
           // .plt-head 右对齐规则），按钮放在它后面会把徽标顶得长短不一。
@@ -358,7 +452,21 @@
            *
            * 尺寸（见 .plt-tag.running / .plt-run-dot）：外框固定 26×20，与文字徽标
            * 的行高 20px 对齐，所以整列右边界不会因为这一条从文字变成图标而移动。
-           * 其余状态（待执行/待审核/已审核/草稿/失败/中断）一个字都没改。
+           * 其余状态（待执行/待审核/草稿/失败/中断）一个字都没改。
+           *
+           * id=358：「已审核」这一档**不再画徽标**。已审核组里的每一条都必然是已审核
+           *（进组条件就是 execute+review），右端再挂一个「已审核」等于把同一句话说 N 遍，
+           * 而且它是整列里最长的一个词，把标题挤短最多。分组位置本身已经说明了状态，
+           * 所以这条分支只留空 —— 不是隐藏（visibility），是真的不渲染节点。
+           * 只影响这一档：其余状态照旧，`statusOf` 与分组判断一个字没动。
+           *
+           * id=368：**待审核这一档也去掉徽标**，理由与「已审核」同一个：
+           * 进组条件就把状态说完了 —— 待在「待审核」组里，每条必然是待审核。
+           * 右端再挂一个「待审核」= 把组名重复 N 遍，还是整列里较长的词。
+           * 省下来的宽度给标题：待审核组是逐条扫读、逐条点「通过」的地方，
+           * 标题截断得越少越好。
+           * 于是 running 之外**只剩**需要「与所在组不同」的状态才画徽标
+           *（待执行 / 草稿 / 失败 / 已中断），组内一致的两种（待审核 / 已审核）都不画。
            */
           status.key === 'running'
             ? h(
@@ -372,11 +480,92 @@
                 },
                 h(SpinnerIcon, { size: 13 }),
               )
-            : h(
-                'span',
-                { className: `plt-tag ${status.key}` },
-                h('span', null, status.label),
-              ),
+            : status.key === 'reviewed' || status.key === 'unreviewed'
+              ? null
+              : h(
+                  'span',
+                  { className: `plt-tag ${status.key}` },
+                  h('span', null, status.label),
+                ),
+          /**
+           * 头部删除入口（id=359 建，id=374 扩到待执行）。
+           *
+           * id=359 时只有「已审核」有：那是回看历史的地方，底部那排要先展开卡片才看得见，
+           * 而删除恰恰是最不需要先读正文的动作。
+           *
+           * id=374 把**待执行**也纳进来，且要求「拆分的和单任务一视同仁」：
+           * 这两类在数据里形状不同（一个父带 children、一个是普通条目），
+           * 但在界面上都是待执行列表里的一行 —— 一行一个垃圾桶，位置统一在头部右端。
+           * 于是「删掉这条」这个动作不再依赖「这条是不是批次」，用户不必记两套位置。
+           *
+           * 为什么用图标：头部是标题行，右侧已经有耗时 / 类型 / 状态 / 通过按钮；
+           * 再塞一个两字中文会跟标题抢宽度，而垃圾桶是这行里唯一的破坏性动作，
+           * 图标 + 红描边既省地方也不容易误点错行。
+           *
+           * title / aria-label / data-tip 三者措辞**按类型换句子**：
+           * 批次是「删除整批」（会连带子任务），普通条目是「删除这条计划」。
+           * 图标没有文字，读屏与悬停全靠这几个属性，措辞必须说清后果。
+           *
+           * 执行中（running）不给：正在跑的条目删掉会打断模型，与底部那排的取舍一致。
+           */
+          /**
+           * id=376：待执行的「转为草稿」也搬到头部，排在垃圾桶**左边**。
+           *
+           * 顺序是刻意的：转草稿是「还能撤回的安排」、删除是「不可恢复」，
+           * 破坏性更强的那个永远在最右端 —— 手滑滑到底撞到的是删除，
+           * 所以更该让它离别的控件远一点、也让人有更长的移动距离可以反悔。
+           *
+           * 为什么文字按钮能进头部（而删除必须用图标）：头部已经有标题在抢宽度，
+           * 两个中文占的地方不小，但它只在待执行组出现（别的组不渲染），
+           * 且 `.plt-head-demote` 里给了 `flex:0 0 auto` + 窄屏收一档，
+           * 最坏情况是标题先截断（.plt-name 是 flex:1 1 auto，本来就该让位）。
+           * 反过来，把「转草稿」做成图标会与垃圾桶混淆 —— 两个都是图标时，
+           * 用户在高频操作里更容易点错那个不可恢复的。
+           *
+           * 批次与单任务**同一个位置、同一个形态**：题面要求的「一视同仁」。
+           * 这需要同时放开 canDemote 里对批次的排除（见 60-tab.js 的注释）。
+           *
+           * 行为一字未动：仍是 onDemote（→ moveToGroup([item.id], true) → call('update')），
+           * 与底部文字按钮同一条通道。
+           */
+          canDemote === true
+            ? h(
+                'button',
+                {
+                  className: 'plt-btn plt-head-demote',
+                  type: 'button',
+                  disabled: busy,
+                  title: '转为草稿：退出执行队列，存进草稿组',
+                  'aria-label': '转为草稿',
+                  'data-tip': isParent === true ? '转为草稿：整批退出执行队列，存进草稿组' : '转为草稿：退出执行队列，存进草稿组',
+                  onClick: (e) => {
+                    // 头部整行是展开/收起的热区，按钮必须自己吃掉点击。
+                    e.stopPropagation()
+                    if (typeof onDemote === 'function') onDemote()
+                  },
+                },
+                '转为草稿',
+              )
+            : null,
+          (groupKey === 'reviewed' || (groupKey === 'todo' && running !== true))
+            ? h(
+                'button',
+                {
+                  className: 'plt-btn plt-icon-btn plt-trash plt-head-del',
+                  type: 'button',
+                  disabled: busy,
+                  title: isParent === true ? '删除整批（含全部子任务）' : '删除这条计划',
+                  'aria-label': isParent === true ? '删除整批' : '删除这条计划',
+                  'data-tip': isParent === true ? '删除整批：父节点与它的全部子任务一起删掉' : '删除这条计划',
+                  onClick: (e) => {
+                    // 头部整行是展开/收起的热区，按钮必须自己吃掉点击。
+                    e.stopPropagation()
+                    if (typeof onRemove === 'function') onRemove()
+                  },
+                },
+                h(TrashIcon, { size: 13 }),
+              )
+            : null,
         ),
         open && isParent === true
           ? h(
@@ -387,11 +576,14 @@
               h(KidsList, {
                 // detail 取回的全量 children 优先（正文没被 lite 截断），没有就用列表那份。
                 kids: loaded !== null && Array.isArray(loaded.children) && loaded.children.length > 0 ? loaded.children : kids,
+                // id=371：只传 groupKey（耗时节点的显示条件要用它）。
+                // busy / onPatch 已随「单个通过」按钮一起移除，理由见 KidsList 顶部。
                 groupKey,
-                busy,
-                onPatch,
               }),
               // 原始提示词仍留在最下面：这一批当初是根据哪句话拆出来的。
+              // id=375：待执行组的批次默认展开（默认值在 Item 顶部的 sourceOpen 算，
+              // 这里不重复判断 —— 否则「默认值」与「渲染条件」会变成两处口径）。
+              // 按钮行为不变：点一下仍可收起，收起后就只留这一行标题。
               (sourceText !== '' || (loaded === null && sourceLen > 0))
                 ? h(
                     'div',
@@ -416,7 +608,7 @@
                       ),
                       h('span', { className: 'plt-sec-caret' }, h(CaretIcon, { size: 12 })),
                     ),
-                    sourceOpen ? h('div', { className: 'plt-source' }, sourceText) : null,
+                    sourceOpen ? h('div', { className: 'plt-source' }, sourceText !== '' ? sourceText : '（加载中…）') : null,
                   )
                 : null,
               h(
@@ -431,7 +623,15 @@
                 h(
                   'div',
                   { className: 'plt-actions' },
-                  running
+                  // id=359：已审核组里整批删除已经在头部右侧了（plt-head-del），
+                  // 这里不再重复画一颗 —— 两处都调 onRemove(item.id)（父连带整批），
+                  // 是同一件事，留两个入口只会让人犹豫该点哪个。
+                  // id=374：待执行（todo）的整批删除也搬到头部了，原因同上 ——
+                  // 而且这一档还要求「拆分的与单任务一视同仁」，所以两者的删除
+                  // 必须落在同一个位置（头部右端），不能再一个在头、一个在底。
+                  // 只剩待审核 / 草稿两档仍把「删除整批」留在这里：
+                  // 它们的头部没有删除图标，删掉这一颗就真的没入口了。
+                  running || groupKey === 'reviewed' || groupKey === 'todo'
                     ? null
                     : h(
                         'button',
@@ -531,27 +731,11 @@
                           h('span', null, copied === 'prompt' ? '已复制' : '提示词'),
                         )
                       : null,
-                    // 「通过」＝原来的底部「审核通过」，按 id=192 的定位搬到这一排、改名、
-                    // 换成与「提示词」完全相同的 .plt-copy-btn 黄底样式（不新增样式类）。
-                    // 触发逻辑一字未动：仍是 onPatch({ review: true })，走 60-tab.js:624 的
-                    // patch，自动展开下一条 / 清空后折叠分组那套行为原样保留。
-                    // 条件也照搬：只有待审核组（showReview）且这条不在执行中才给——
-                    // 执行中的条目还没有结果可审，已审核的则早已整排不再重复出现。
-                    showReview === false || running
-                      ? null
-                      : h(
-                          'button',
-                          {
-                            className: 'plt-copy-btn',
-                            disabled: busy || item.review === true,
-                            'data-tip': '人工审核这一条的执行结果：标记为已通过',
-                            onClick: (e) => {
-                              e.stopPropagation()
-                              onPatch({ review: true })
-                            },
-                          },
-                          h('span', null, '通过'),
-                        ),
+                    // id=368：「通过」已经从这一排搬到**头部**（见上面那颗 plt-head-pass）。
+                    // 这里不再画第二颗 —— 同一屏出现两个「通过」，一个在收起时可见、
+                    // 一个展开后才出现，用户会犹豫该点哪个，而它们其实是同一个动作。
+                    // 展开区的这一排保留复制类按钮（ID / 内容 / 提示词），它们仍然需要在
+                    // 读到正文之后才用得上。
                   ),
                 ),
                 editable === true && editing
@@ -624,6 +808,14 @@
               // 手工提交的条目 sourcePrompt 为空，整段不渲染，展开后不会多出一块空框。
               // 默认折叠：原文可能很长（整段需求），默认铺开会把卡片撑得很长，
               // 用户是来看「做完了没」的，不是来重读需求的 —— 想看得自己点开。
+              //
+              // id=375 补一句：上面这段理由现在**只适用于单任务**。
+              // 拆解批次的默认值改成了「待执行组里默认展开」（见 Item 顶部
+              // sourceOpen 那段注释）。这里是单任务那条渲染路径 —— 单任务没有
+              // 子任务列表，展开区里就只剩这段原文，标题又已经压自同一段提示词，
+              // 默认展开只是把卡片撑成两倍高、信息还是重复的，所以保持折叠。
+              // 两条路径共用一个 sourceOpen，但默认值按 isParent 分派，
+              // 因此这里渲染出的仍然是折叠态（除非用户自己点开）。
               (sourceText !== '' || (loaded === null && sourceLen > 0))
                 ? h(
                     'div',
@@ -648,7 +840,10 @@
                       ),
                       h('span', { className: 'plt-sec-caret' }, h(CaretIcon, { size: 12 })),
                     ),
-                    sourceOpen ? h('div', { className: 'plt-source' }, sourceText) : null,
+                    // id=375：同父批次路径 —— 默认展开后首屏可能还没有全文，
+                    // 渲染空框会是一块有边框有内边距的空白。单任务默认仍是折叠，
+                    // 但用户点开那一刻 detail 也可能还没回来，所以同样要兜。
+                    sourceOpen ? h('div', { className: 'plt-source' }, sourceText !== '' ? sourceText : '（加载中…）') : null,
                   )
                 : null,
               h(
@@ -699,57 +894,35 @@
                         '转为待执行',
                       )
                     : null,
-                  // 待执行里还没开工的条目可以退回草稿（执行中不给，见 canDemote）。
-                  canDemote === true
-                    ? h(
-                        'button',
-                        {
-                          className: 'plt-btn plt-demote',
-                          disabled: busy,
-                          'data-tip': '转为草稿：退出执行队列，存进草稿组',
-                          onClick: (e) => {
-                            e.stopPropagation()
-                            onDemote()
-                          },
-                        },
-                        '转为草稿',
-                      )
-                    : null,
+                  // id=376：「转为草稿」已搬到头部（见上方那颗 plt-head-demote），
+                  // 这里不再重复画一颗。搬运的理由与删除那颗一样 ——
+                  // 待执行是逐条排队的清单，用户要先把不合意的几条退回去，
+                  // 这不需要先展开卡片读正文；而且拆分的批次与单任务的
+                  // 位置必须一致（题面要求），否则又变成两套记法。
+                  // 与其他「已搬到头部」的按钮不同，这一颗不保留任何兜底：
+                  // 它只在待执行组出现，而待执行组的头部一定画得出来
+                  //（canDemote 与头部那颗用的是同一个条件）。
                   /**
-                   * 待执行的条目在「转为草稿」之后多一个垃圾桶图标按钮（id=353）。
+                   * id=374：待执行的删除入口已从这一排**上移到头部右端**
+                   *（见上方那颗 plt-head-del 的注释），这里不再重复画一颗。
                    *
-                   * 为什么用图标而不是再加一个「删除」文字按钮：这一排已经有两个文字按钮，
-                   * 再加第三个在窄侧栏里会挤成两行。图标按钮宽度固定，永远不会换行。
+                   * 原来这颗是 id=353 加在这里的：当时理由是「这一排已有两个文字按钮，
+                   * 再加第三个会挤成两行」。那个理由仍然成立，只是结论要换个位置 ——
+                   * 待执行的删除不该在展开区里等用户先展开卡片，而头部右端本来就是
+                   * 已审核那一档删除的位置。两档统一过去，「删除这条」在待执行与已审核
+                   * 里的位置就一致了，批次与单任务也一致（题面要求的「一视同仁」）。
                    *
-                   * 样式要点（见 .plt-icon-btn）：36×26 的点击热区、与相邻按钮同高、
-                   * gap 与 .plt-actions 一致，所以加进来不会把这一排顶到第二行。
-                   *
-                   * 点击走的就是现有删除通道（onRemove → remove），与文字「删除」按钮同一条路，
-                   * 没有第二套逻辑 —— 两处行为不可能走散。
+                   * .plt-icon-btn / .plt-trash 这两个类没有废弃：头部那颗仍在用它们，
+                   * 尺寸与删除色同源，只是挪了宿主节点。
                    */
-                  groupKey === 'todo' && running !== true
-                    ? h(
-                        'button',
-                        {
-                          className: 'plt-btn plt-icon-btn plt-trash',
-                          type: 'button',
-                          disabled: busy,
-                          'data-tip': '删除这条待执行',
-                          title: '删除这条待执行',
-                          'aria-label': '删除这条待执行',
-                          onClick: (e) => {
-                            // 阻止冒泡：不然点按钮会连带把这一行展开/收起。
-                            e.stopPropagation()
-                            if (typeof onRemove === 'function') onRemove()
-                          },
-                        },
-                        h(TrashIcon, { size: 13 }),
-                      )
-                    : null,
                   // 执行中的条目整排操作都不给：转草稿/删除直接隐藏，不留灰按钮。
-                  // 待执行栏的删除已经收成上面的垃圾桶图标（id=353），这里不再重复放文字按钮 ——
+                  // 待执行栏的删除已经在头部（id=374），这里不再重复放文字按钮 ——
                   // 一栏只留一个删除入口，免得用户犹豫该点哪个。
-                  running === true || groupKey === 'todo'
+                  // id=359：已审核那一档的删除也在头部（plt-head-del）。
+                  // 于是头部有删除图标的两档（待执行 / 已审核）底部都不再画；
+                  // 待审核 / 草稿两档的头部没有删除图标，底部这颗必须留着，
+                  // 否则这两个入口就真的丢了。
+                  running === true || groupKey === 'todo' || groupKey === 'reviewed'
                     ? null
                     : h(
                         'button',

@@ -26,9 +26,15 @@
 .plt-bulk-promote:hover:not(:disabled){background:linear-gradient(180deg,rgba(var(--plt-accent),1),rgba(var(--plt-accent),.9));box-shadow:0 1px 3px rgba(0,0,0,.24),0 0 18px -4px rgba(var(--plt-accent),.9)}
 .plt-bulk-promote:active:not(:disabled){transform:translateY(1px)}
 .plt-bulk-promote:disabled{opacity:.4;cursor:default;box-shadow:none}
-/* 条目内的「转为待执行 / 转为草稿」：小一号的描边胶囊，别抢删除的视觉重量。 */
-.plt-promote,.plt-demote{border-radius:999px;border-color:rgba(var(--plt-accent),.55);color:rgba(var(--plt-accent),1)}
-.plt-promote:hover:not(:disabled),.plt-demote:hover:not(:disabled){background:rgba(var(--plt-accent),.14);border-color:rgba(var(--plt-accent),.8)}
+/* 条目内的「转为待执行 / 转为草稿」：小一号的描边胶囊，别抢删除的视觉重量。
+   id=376：待执行的「转为草稿」搬到头部后，那一颗换用头部专用的类
+   （见 15-detail.js，它还要处理「不参与标题伸缩」与窄屏让位），
+   所以原来那条共用的 demote 选择器不再有宿主 —— 一并删掉，只留 promote
+   （草稿组底部那颗「转为待执行」仍在原处用着）。
+   注意：这里刻意不写出被删掉的类名。dead-css.mjs 扫的是整份文件的原始文本、
+   不区分注释，注释里带点写一次就等于声称「这个类还有定义」。 */
+.plt-promote{border-radius:999px;border-color:rgba(var(--plt-accent),.55);color:rgba(var(--plt-accent),1)}
+.plt-promote:hover:not(:disabled){background:rgba(var(--plt-accent),.14);border-color:rgba(var(--plt-accent),.8)}
 /* 条目内的「审核通过」在 id=193 已搬进「计划」标题行、改用 .plt-copy-btn（与「提示词」同款），
  * 这套实心琥珀胶囊样式与 30-light.js 里的浅色覆盖一并删除 —— 留着就是 dead-css 门禁要抓的死规则。 */
 /* 「开始干活」：待执行组底部的主动作按钮。用本组的粉调做强调，实心填充，比其他按钮更显眼。 */
@@ -51,6 +57,14 @@
 .plt-group-empty{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:14px;color:var(--dsw-alias-label-caption,#8a8a8a);font-size:12.5px;opacity:.8;text-align:center;line-height:1.6}
 .plt-group-empty svg{opacity:.6}
 .plt-err{margin:6px 10px;padding:7px 10px;border-radius:6px;background:rgba(212,106,106,.12);border:1px solid rgba(212,106,106,.35);color:#e08b8b;line-height:1.55;word-break:break-word;font-size:14px}
+/* 「没有可用模型」的引导条（id=364）。
+   和 .plt-err 刻意分开：这不是错误（没有模型不等于用坏了），用琥珀而不是红 ——
+   红色会让人以为自己做错了什么，而真实情况通常是「还没配」或「刚配好还没刷新」。
+   横向排：左边一句说明，右侧一个可点的动作。窄侧栏时文字换行、按钮始终不被压掉
+   （按钮 flex:0 0 auto，说明文字 flex:1 1 auto + min-width:0）。 */
+.plt-guide{display:flex;align-items:center;gap:8px;margin:6px 10px;padding:7px 10px;border-radius:6px;background:rgba(255,180,60,.10);border:1px solid rgba(255,180,60,.32);color:#e0b276;line-height:1.55;word-break:break-word;font-size:13px}
+.plt-guide-txt{flex:1 1 auto;min-width:0}
+.plt-guide-btn{flex:0 0 auto}
 .plt-mask{position:absolute;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px;z-index:20}
 .plt-dialog{width:100%;max-width:360px;background:var(--dsw-alias-bg-primary,#1e1e1e);border:1px solid var(--dsw-alias-border-secondary,rgba(255,255,255,.14));border-radius:10px;padding:16px;box-shadow:0 12px 32px rgba(0,0,0,.4)}
 .plt-dialog h3{margin:0 0 9px;font-size:16px}

@@ -21,29 +21,17 @@
 .plt-auto .plt-dot{width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-label-caption,#8a8a8a);flex:0 0 auto}
 .plt-auto.on{color:var(--dsw-alias-label-accent,#7fb0ff);border-color:rgba(80,140,255,.45)}
 .plt-auto.on .plt-dot{background:#4caf50;box-shadow:0 0 0 2px rgba(76,175,80,.18)}
-/* 刷新按钮（id=196/197）：图标位 + 文案位，图标默认静止。
-   inline-flex + gap 让图标与文字在一行内垂直居中；不用 margin 拼间距，
-   否则按钮被压窄时两端留白不对称。颜色走 currentColor，
-   深/浅色主题各自由 .plt-btn 的 color 决定，这里不写死颜色。 */
-.plt-refresh{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto}
-.plt-refresh-ico{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;flex:0 0 auto;color:currentColor}
-.plt-refresh-label{flex:0 0 auto}
-/* 「旋转中」与「静止」两个状态类（id=197），由忙碌状态二选一挂上，见 id=198。
-   - .spinning：圆弧匀速转；
-   - .idle：显式声明不转，并把不透明度钉在 1（图标是装饰位，不该因为状态类
-     切换而变淡/变亮，否则按钮文字看着会「闪」一下）。
-   两者都只作用于 svg，容器尺寸不变，切换时不会触发重排。
-   复用 15-detail.js 已有的 plt-spin 关键帧，避免同一套旋转写两遍；
-   减少动态偏好下即使带 spinning 也不转。 */
-.plt-refresh-ico.spinning svg{animation:plt-spin .9s linear infinite;transform-origin:50% 50%}
-.plt-refresh-ico.idle svg{animation:none;opacity:1}
-@media (prefers-reduced-motion: reduce){.plt-refresh-ico.spinning svg{animation:none}}
-/* 开始 / 暂停（id=207）：与刷新同族的图标按钮。
+/* 开始 / 暂停（id=207）：顶栏里的图标按钮。
    inline-flex + gap 让图标与文字垂直居中并保持固定间距；flex:0 0 auto
-   保证顶栏被压窄时这两个按钮不参与收缩，压缩全部由 .plt-title 承担。 */
-.plt-start,.plt-pause{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto}
-/* 开始按钮是这一行里唯一的主动作，给一点绿色倾向（不是实心，仍然克制），
-   让它在「自动刷新」「刷新」两个中性按钮里能被一眼找到。 */
+   保证顶栏被压窄时这个按钮不参与收缩，压缩全部由 .plt-title 承担。
+   id=354：两组类名保留，但同一时刻只会挂上其中一个（由 agentRunning 决定），
+   所以下面那套「互斥」的配色实际上永远作用于屏幕上唯一的那颗按钮。
+   min-width + 居中（id=354）：这颗按钮的文案会在 开始 / 继续 / 发送中… / 暂停 / 暂停中
+   之间换，字数不同。给一个按最长文案（「发送中…」）量的固定宽度，
+   换文案时按钮不伸缩，右侧的倒计时也不会跟着左右跳。 */
+.plt-start,.plt-pause{display:inline-flex;align-items:center;justify-content:center;gap:5px;flex:0 0 auto;min-width:88px}
+/* 开始按钮是这一行里的唯一的主动作，给一点绿色倾向（不是实心，仍然克制），
+   让它在中性的「自动刷新」按钮旁边能被一眼找到。 */
 .plt-start:not(:disabled){color:var(--dsw-alias-label-primary,#e6e6e6)}
 .plt-start:not(:disabled):hover{background:rgba(34,150,84,.14);border-color:rgba(34,150,84,.42)}
 /* 暂停是反向动作，hover 透出暖橙，与开始分得开又不至于像报错。 */
@@ -53,12 +41,13 @@
    · .plt-start.is-resume —— 已挂起，这个按钮现在是「继续」，用蓝调与「开始」的绿区分；
    · .plt-pause:not(:disabled) —— 执行中它才是可点的，给琥珀描边说明「现在能停」；
    · :disabled —— 统一压到 .42（.plt-btn 的 .5 在这两个带色按钮上仍然偏亮）；
-   · .plt-top.has-error —— 上次操作失败时两按钮描红，和顶部的错误提示对上。 */
+   · .plt-top.has-error —— 上次操作失败时描红，和顶部的错误提示对上。
+   id=354 起屏幕上只有一颗按钮，这些规则按「它此刻是谁」生效，不再需要两颗对齐。 */
 .plt-start.is-resume:not(:disabled){color:rgba(120,162,255,.98);border-color:rgba(80,140,255,.46);background:rgba(65,118,230,.12)}
 .plt-start.is-resume:not(:disabled):hover{background:rgba(65,118,230,.20);border-color:rgba(80,140,255,.62)}
 .plt-pause:not(:disabled){color:rgba(255,190,90,.96);border-color:rgba(255,180,60,.42)}
 .plt-start:disabled,.plt-pause:disabled{opacity:.42}
-/* 执行中把「暂停」的图标压暗一点点，避免两个按钮的图标亮度互相抢眼；
+/* 执行中把「暂停」的图标压暗一点点，让文字比图标更先被读到；
    文字保持可读，禁用时不受影响（:not(:disabled) 已经排除）。 */
 .plt-pause:not(:disabled) svg{opacity:.92}
 .plt-top.has-error .plt-start,.plt-top.has-error .plt-pause{border-color:rgba(214,68,68,.52)}
