@@ -6,11 +6,32 @@
       // 页签是否真的在前台可见。better-sidebar 的语义是「当前页签且右侧栏展开」，
       // 不可见时继续轮询纯属白烧流量与渲染。
       const visible = props.visible !== false
-      const payload = { sessionId, cwd }
-      // 草稿按项目根目录隔离存放，刷新 / 重新挂载都不丢。
+      // id=384：payload 必须**稳定引用**，否则「干完一条不派下一条」。
+      //
+      // 这是一个隐蔽的连锁反应，三步：
+      //   1. 这里原来是 `const payload = { sessionId, cwd }` —— 每次渲染都新建一个对象；
+      //   2. dispatchNext 的依赖数组里有 payload，于是它每次渲染都是新函数；
+      //   3. 派发 effect 的依赖里有 dispatchNext，于是**每次渲染都会重跑 effect**：
+      //      重跑 → cleanup 执行 → `if (!started) clearTimeout(timer)` → 定时器被取消。
+      //      而面板在执行期间本来就在不停重渲染（轮询 sync、agentRunning、notice 计时器），
+      //      DISPATCH_SETTLE_MS（1.2s）几乎总会被下一次渲染打断。
+      //      结果就是：计时器永远走不到点，dispatchNext 永远不被调用 ——
+      //      用户看到的现象正是「干完一个任务后没有自动下发下一个」。
+      //
+      // 用 useMemo 固定：sessionId / cwd 不变时，payload 是同一个对象引用，
+      // dispatchNext 与 effect 也就不再抖动。
+      //
+      // 注意：**不能**只把 dispatchNext 的依赖改成 [] 来「解决」——
+      // 那样它会永久捕获首次渲染的 payload，切会话后会把任务派进旧会话。
+      // 这里修的是源头（引用不稳定），不是把症状盖住。
+      const payload = React.useMemo(() => ({ sessionId, cwd }), [sessionId, cwd])
+      // 输入框文本等面板状态按项目根目录隔离存放，刷新 / 重新挂载都不丢。
       const storeKey = `dsh-plan-tasks:${cwd || 'default'}`
 
-      const readDraft = () => {
+      // id=405：这个函数原来叫 readDraft —— 名字里的「Draft」指的是「输入框草稿」，
+      // 与草稿模式无关。但草稿模式删除后，这个名字会让人误以为它读的是草稿开关状态。
+      // 改成 readSaved：它读的就是「面板上次保存的状态」，与草稿没有任何关系。
+      const readSaved = () => {
         try {
           const raw = window.localStorage.getItem(storeKey)
           if (raw === null) return null
@@ -20,7 +41,7 @@
           return null
         }
       }
-      const saved = readDraft()
+      const saved = readSaved()
 
       const [state, setState] = React.useState({ loading: true, error: '', data: null })
       // 统一悬浮提示（id=249）：气泡挂在面板根上做事件委托，这里只提供根节点。
@@ -30,14 +51,20 @@
       const [openId, setOpenId] = React.useState(saved?.openId ?? null)
       const [busy, setBusy] = React.useState(false)
       const [showInit, setShowInit] = React.useState(false)
-      // 草稿模式：点亮时「发送」把内容推进「草稿」组而不是「待执行」。
-      const [draftMode, setDraftMode] = React.useState(saved?.draftMode === true)
+      // id=405：**草稿模式整体移除**（题面：找出草稿模式的所有 UI 承载并删除，
+      // 保证界面不再出现任何草稿相关元素）。
+      // 原来这里有一个 draftMode 开关，点亮后「发送」把内容推进「草稿」组。
+      // 现在没有草稿这个概念了：提交一律进待执行，不再有第二个落点。
       // 深入模式：点亮后「发送」会把输入框里的任务包装成一段要求「重写并做深」的提示词。
       const [deepMode, setDeepMode] = React.useState(saved?.deepMode === true)
-      // 拆解模式：点亮后「发送」不直接落一条，而是交给宿主按项目情况拆成多条草稿。
+      // 拆解模式：点亮后「发送」不直接落一条，而是交给宿主按项目情况拆成多条（落进待执行）。
       const [splitMode, setSplitMode] = React.useState(saved?.splitMode === true)
       // 拆解是异步 LLM 调用，比 append 慢得多，单独做「正在拆解…」的进度提示。
       const [splitting, setSplitting] = React.useState(false)
+      // id=wZIKdd：顶栏的「自动确认」开关已按用户要求整体删除。
+      // 它原本是个**空壳功能** —— settings.json 里存了 autoConfirm，
+      // 但没有任何业务代码读它来执行自动审核（approveBatch 只看 backupBeforeTrim）。
+      // 所以删除是干净的：不留行为空洞，也不影响任何既有流程。
       const [form, setForm] = React.useState({
         plan: typeof saved?.plan === 'string' ? saved.plan : '',
         mode: typeof saved?.mode === 'string' ? saved.mode : '',
@@ -56,12 +83,18 @@
       }
       const [dragId, setDragId] = React.useState(null)
       const [dropId, setDropId] = React.useState(null)
+      // id=397：刚落下的那一条（播一记回弹确认「放好了」）。
+      // 用 state 而不是直接改 DOM —— 与旁边两个拖拽状态同一套数据流，
+      // 渲染层只管把类名拼上去（见 Item 的 className）。
+      // 定时器要留住引用：连续快速拖两次时，后一次必须清掉前一次的 timer，
+      // 否则第一次的回弹会在第二次拖拽途中被强行结束（或更糟：把状态清空）。
+      const [droppedId, setDroppedId] = React.useState(null)
+      const droppedTimerRef = React.useRef(null)
       // 「待审核」组里批量勾选的 id 集合。
       const [picked, setPicked] = React.useState(() => new Set())
       // 「已审核」组里批量勾选的 id 集合（用于批量删除）。
       const [pickedDone, setPickedDone] = React.useState(() => new Set())
-      // 「草稿」组里批量勾选的 id 集合（用于批量转待执行 / 批量删除）。
-      const [pickedDraft, setPickedDraft] = React.useState(() => new Set())
+      // id=405：草稿组的批量勾选状态随草稿组一并删除。
       // 分组展开态：手风琴互斥，同一时刻只有一个组展开（null = 全部折叠）。
       // 也存 localStorage，刷新后保持。
       // id=356：`null` 必须原样读回来。以前这里 `JSON.parse('null')` 得到 null 后
@@ -74,7 +107,13 @@
           if (raw === null) return 'todo'
           const parsed = JSON.parse(raw)
           // 兼容旧版存的对象格式（{todo:true,...}），迁移成单个 key。
-          if (typeof parsed === 'string') return parsed
+          if (typeof parsed === 'string') {
+            // id=405：历史值可能是 'draft'（草稿组曾是可展开的一组）。草稿组已删，
+            // 直接返回 'draft' 不会崩，但会让「没有任何组匹配 isOpen」——
+            // 表现为刷新后所有组都收起了，用户会以为折叠状态没保存。
+            // 归一成 null（明确的「全部收起」）更诚实，也与 id=356 的语义一致。
+            return parsed === 'draft' ? null : parsed
+          }
           // 「全部折叠」是一个真实的状态，不是「读不到」—— 直接返回 null，
           // 不要让它掉进下面的兜底分支。
           if (parsed === null) return null
@@ -127,6 +166,19 @@
       // id=341：这一轮结束后是否已经派过下一条。会话 running 会抖（工具调用之间也算空闲），
       // 没有这个标记就会在同一个空档里连派几条。只在真正发出请求时置位；定时器被清掉或请求失败要放回来。
       const dispatchedRef = React.useRef(false)
+      // id=384：「这一轮回答结束、但还没派发下一条」的待处理边沿。
+      //
+      // 为什么需要它（这是「干完一条不派下一条」的第二道保险）：
+      // 派发靠 setTimeout 在 running 由 true→false 后等 1.2s 再动作，
+      // 而这个 effect 的 cleanup 会取消未到点的定时器。只要结算期内面板重渲染一次
+      // 且依赖随之变化，定时器就没了，边沿被白白消费掉 —— 之后再没有任何东西会补派。
+      // 固定的引用（payload 用 useMemo）解决了绝大部分情况，但 effect 仍可能因
+      // 其它原因重跑；有这面旗之后，「边沿还没人处理」这件事本身是可见的，
+      // 下一次 effect 跑起来（无论因为什么）都能把它捡回来。
+      const pendingEdgeRef = React.useRef(false)
+      // 当前挂着的派发定时器（id=384）。用来避免「每次重渲染都重新挂一个」——
+      // 那会把结算期无限推后，症状与「定时器被取消」相同（永远不派）。
+      const dispatchTimerRef = React.useRef(null)
       // id=379：「完成后暂停」当前值 —— 派发 effect 要用它做闸门。
       //
       // 为什么必须是 ref 而不是直接读 state：派发 effect 的依赖只有
@@ -183,14 +235,17 @@
       // 「正在重新加载模型列表」：用户点引导按钮时的忙碌态，避免连点。
       const [modelLoading, setModelLoading] = React.useState(false)
 
-      // 输入框草稿 / 展开项 / 自动刷新开关 / 草稿模式 / 深入模式 / 拆解模式，任何一项变化都落一次本地存储。
+      // 输入框草稿 / 展开项 / 自动刷新开关 / 深入模式 / 拆解模式，任何一项变化都落一次本地存储。
+      // id=405：写入是「白名单式」的（显式列出字段，不是整体展开旧对象），
+      // 所以老用户 localStorage 里残留的 draftMode 字段会在下一次写入时自然消失，
+      // 不需要专门写一段清理代码。
       React.useEffect(() => {
         try {
-          window.localStorage.setItem(storeKey, JSON.stringify({ ...form, openId, auto, draftMode, deepMode, splitMode }))
+          window.localStorage.setItem(storeKey, JSON.stringify({ ...form, openId, auto, deepMode, splitMode }))
         } catch {
           /* 隐私模式下写不进去就算了 */
         }
-      }, [storeKey, form, openId, auto, draftMode, deepMode, splitMode])
+      }, [storeKey, form, openId, auto, deepMode, splitMode])
 
       const run = React.useCallback(
         async (fn) => {
@@ -227,14 +282,19 @@
 
       // —— 转组「升华」动画 ——
       // 记住上一次渲染时每条计划挂在哪个分组，任何一条换了分组
-      // （草稿 → 待执行 → 待审核 → 已审核，或者退回）就在新分组里播一遍浮起动画。
+      // （待执行 → 待审核 → 已审核，或者退回）就在新分组里播一遍浮起动画。
       // 用数据指纹做 useMemo 依赖：自动刷新拿回一模一样的数据时不会重播。
       const groupOfItem = (it) => {
-        if (it.draft === true) return 'draft'
+        // id=405：草稿组已移除，不再有 'draft' 这一档。
         if (it.execute === true) return it.review === true ? 'reviewed' : 'unreviewed'
         return 'todo'
       }
       const liveItems = state.data?.items ?? []
+      // id=89-D：派发记录（由宿主 read 下发）。「执行中」靠它与条目 id 关联判定。
+      // 每次轮询都重算 —— 派发记录一变（这轮投完了 / 下一条被投），
+      // 状态立刻就跟着变，不会出现「本次没有派发、界面却显示执行中」的错位。
+      // 拿不到时是 undefined，statusOf 会自动退化到只信 startedAt（向后兼容）。
+      const delivered = state.data?.delivered
       const groupSig = liveItems.map((it) => `${it.id}:${groupOfItem(it)}`).join('|')
       const prevGroupsRef = React.useRef({ sig: '', map: new Map() })
       const moved = React.useMemo(() => {
@@ -404,7 +464,7 @@
       const impliedRunningId = (() => {
         if (agentRunning !== true) return null
         const first = items.find(
-          (it) => it.execute !== true && it.draft !== true && it.failed !== true && (typeof it.startedAt !== 'string' || it.startedAt === ''),
+          (it) => it.execute !== true && it.failed !== true && (typeof it.startedAt !== 'string' || it.startedAt === ''),
         )
         return first === undefined ? null : first.id
       })()
@@ -415,7 +475,7 @@
       // 于是会话在跑、模型还没回填的那几秒，上方写 0 条、下面却有一条「执行中」。
       // 现在统一交给 statusOf，两边不可能再对不上。
       // id=233：statusOf 把 interrupted 排在 running 之前，所以被中断的条目不会再被数进来。
-      const runningCount = items.filter((it) => statusOf(it, impliedRunningId === it.id).key === 'running').length
+      const runningCount = items.filter((it) => statusOf(it, impliedRunningId === it.id, delivered).key === 'running').length
 
       // id=378：「完成后暂停」在进入空闲（无执行中任务）时复位为默认「继续执行」。
       //
@@ -467,7 +527,7 @@
         .filter(
           (it) =>
             it.execute !== true
-            && it.draft !== true
+           
             && it.failed !== true
             && it.interrupted !== true
             && typeof it.startedAt === 'string'
@@ -554,7 +614,7 @@
       // 开始 / 暂停 这颗合成按钮的可用性（id=208，id=354 合并）：
       // 只由「有没有待办 / 是否在跑 / 有没有挂起」三个既存事实推导，
       // 不另存一份状态，否则四个来源迟早对不上。
-      const pendingCount = items.filter((it) => it.execute !== true && it.draft !== true).length
+      const pendingCount = items.filter((it) => it.execute !== true).length
       // 「已挂起」= 主动暂停过，且此刻确实没在跑。pause 请求刚发出、turn 还没停下时仍算执行中。
       const pausedIdle = paused === true && working !== true
       const canStart = busy !== true && starting !== true && working !== true && pendingCount > 0
@@ -706,36 +766,40 @@
           await split()
           return
         }
-        // 最终提示词统一由 composePrompt 拼（id=262）：草稿存原文、仅回答前缀独占一行、
+        // 最终提示词统一由 composePrompt 拼（id=262）：仅回答前缀独占一行、
         // 深入模式先包模板再叠前缀，且自带幂等与 CRLF 归一。以前这段在 append 里手拼，
         // split() 那边另有一套，两处规则迟早走散。
+        // id=405：draft 选项已随草稿模式移除，这里不再传它。
         const text = composePrompt({
           text: form.plan,
           taskType: form.taskType,
           deep: deepMode,
-          draft: draftMode,
         })
         const data = await run(() =>
           // mode 由宿主按 taskType 推（客户端没有模式下拉，form.mode 恒为空串）；
           // 显式传 taskType 就够了，这里保留 mode 字段是为了将来加真下拉时不必改协议。
-          call('append', { ...payload, plan: text, mode: form.mode, taskType: form.taskType, draft: draftMode }),
+          call('append', { ...payload, plan: text, mode: form.mode, taskType: form.taskType }),
         )
         if (data !== undefined) {
           // 提交后停留在当前视图：只清空输入框并就地给一条提示，
           // 不展开新计划、不滚动列表、不切换选中项（否则会“跳走”）。
           setForm({ plan: '', mode: form.mode, taskType: form.taskType, expanded: false })
-          // 提交后自动展开落点那一栏（草稿 or 待执行），让刚写进去的计划立刻可见。
-          setOpenGroup(draftMode ? 'draft' : 'todo')
+          // id=388：**不再自动展开待执行组**（题面：发送消息时不再自动展开）。
+          //
+          // 原来这里是 `setOpenGroup(draftMode ? 'draft' : 'todo')`，想让刚提交的
+          // 计划立刻可见。但代价是：用户如果正看着「待审核」或「已审核」，
+          // 一发消息就被拽回待执行组 —— 分组折叠状态是**用户自己设的视角**，
+          // 不该被一次提交改掉。而「刚写进去的那条在哪」其实已经由
+          // 下面那句 notice 说明了，不依赖展开。
           // 提交即刷新，并把倒计时拨回起点。
           await sync()
           setTick(AUTO_INTERVAL)
           // 提交后不再自动开工：开工由用户在「待执行」下方的「开始干活」按钮手动触发。
+          // id=405：草稿模式移除后，「已存入草稿」这条分支不会再有。
           setNotice(
-            draftMode
-              ? `已存入草稿 #${data.item?.id ?? '?'}`
-              : deepMode
-                ? `已追加计划 #${data.item?.id ?? '?'}（深入模式，已改写提示词）`
-                : `已追加计划 #${data.item?.id ?? '?'}`,
+            deepMode
+              ? `已追加计划 #${data.item?.id ?? '?'}（深入模式，已改写提示词）`
+              : `已追加计划 #${data.item?.id ?? '?'}`,
           )
         }
       }
@@ -799,7 +863,7 @@
 
       /**
        * 拆解模式提交：交给宿主收集项目快照 → 一次 LLM → 写成 N 条。
-       * 落在哪一组看右侧「草稿」开关：点亮 → 草稿组；没点亮 → 直接进待执行。
+       * id=405：草稿开关已删除，拆解产物一律进待执行。
        * 宿主会做幂等（同一句话重复提交不会产生重复条目）与原子写。
        */
       const split = async () => {
@@ -820,8 +884,7 @@
           return
         }
         setModelMissing(false)
-        // 拆解落点跟着「草稿」开关走，整段只取一次快照，避免异步期间开关被改。
-        const toDraft = draftMode === true
+        // id=405：草稿模式移除后，拆解**固定落在待执行**，不再有第二个落点。
         setSplitting(true)
         setState((prev) => ({ ...prev, error: '' }))
         setNotice(`正在按项目情况拆解…（模型 ${route.model}）`)
@@ -833,7 +896,6 @@
               question: text,
               mode: form.mode,
               taskType: form.taskType,
-              draft: toDraft,
               // id=262：深入开关以前在拆解分支里被完全丢掉，用户在面板上点亮了「深入」
               // 却看不出任何差别。现在把意图明确传给宿主，由拆解提示词要求每条子任务
               // 都按「做深而不是做大」来写。
@@ -853,17 +915,19 @@
             const tips = []
             if (cut.length > 0) tips.push(`建议砍掉：${cut.join('；')}`)
             if (missing.length > 0) tips.push(`模型提到了不存在的文件：${missing.join('、')}`)
-            const where = toDraft ? '草稿' : '待执行'
+            // id=405：草稿落点已移除，拆解产物一律进待执行。
             // id=223：这条会带「建议砍掉 / 模型提到了不存在的文件」等附加信息，实测能到 79 字，
             // 默认 3.8 秒读不完，单独给更长时长。上面的「已拆解过了」是短答复，仍走默认。
             // id=262：深入模式下补一句，否则用户看不出这个开关到底做了什么。
             setNotice(
-              `已拆解 ${count} 条到${where}${deepMode ? '（深入）' : ''}${tips.length > 0 ? ` · ${tips.join(' · ')}` : ''}`,
+              `已拆解 ${count} 条到待执行${deepMode ? '（深入）' : ''}${tips.length > 0 ? ` · ${tips.join(' · ')}` : ''}`,
               NOTICE_LONG_MS,
             )
           }
           setForm({ plan: '', mode: form.mode, taskType: form.taskType, expanded: false })
-          setOpenGroup(toDraft ? 'draft' : 'todo')
+          // id=388：同样不再自动展开（原因见 submit 那段注释）。
+          // 拆解会一次落 N 条到待执行，但「落了几条」notice 里已经写了
+          //（`已拆解 N 条到待执行…`），不需要再靠切分组来表达。
           await sync()
           setTick(AUTO_INTERVAL)
         } catch (error) {
@@ -932,7 +996,7 @@
         // 只摘**数组里最靠前**的那一条：技能规定多条带 startedAt 时只续做最靠前的那条，
         // 全部摘掉会让后面那些明明没在跑的条目也显示成「执行中」。
         const resumeOne = (items ?? []).find(
-          (it) => it.interrupted === true && it.execute !== true && it.draft !== true,
+          (it) => it.interrupted === true && it.execute !== true,
         )
         const resumeIds = resumeOne === undefined ? [] : [resumeOne.id]
         setPaused(false)
@@ -1062,7 +1126,7 @@
               const losers = (data.items ?? []).filter(
                 (it) =>
                   it.execute !== true
-                  && it.draft !== true
+                 
                   && it.interrupted !== true
                   && typeof it.startedAt === 'string'
                   && it.startedAt !== ''
@@ -1137,10 +1201,12 @@
             await new Promise((resolve) => window.setTimeout(resolve, 100))
           }
           if (!still()) {
-            // 被「完成后暂停」拦下时要说一句，否则用户只看到任务停了、没有任何解释。
+            // 被「停后」拦下时要说一句，否则用户只看到任务停了、没有任何解释。
             // 其他情况（换会话 / 暂停 / 又跑起来）本来就有各自的提示或天然可见的状态，不重复。
             if (pauseAfterDoneRef.current === true) {
-              setNotice('已完成，按「完成后暂停」停在空闲；拨回「继续执行」可继续派发', NOTICE_LONG_MS)
+              // id=6Gs9v1-C：文案跟着按钮一起改（「停后」/「继续」），
+              // 否则提示里说「完成后暂停」、按钮上写着「停后」，用户要自己猜是不是同一个东西。
+              setNotice('已完成，按「停后」停在空闲；点「继续」可恢复派发', NOTICE_LONG_MS)
             }
             return
           }
@@ -1215,23 +1281,44 @@
         if (agentRunning === true) {
           // 新一轮开跑：允许它结束后再派一次。
           dispatchedRef.current = false
+          pendingEdgeRef.current = false
           return undefined
         }
-        if (was !== true) return undefined
         if (pausedByUserRef.current === true) return undefined
+        // id=384：两种进入方式——
+        //   · 正常边沿：上一帧在跑、这一帧停了；
+        //   · 补派：上一帧就已经停了，但那次边沿的定时器被 cleanup 取消了
+        //     （pendingEdgeRef 仍是 true）。这是「干完一条不派下一条」的修复核心：
+        //     即使定时器没走到点，这件事仍然记着，下一次 effect 会重新挂上。
+        const isEdge = was === true
+        const isResume = was !== true && pendingEdgeRef.current === true
+        if (!isEdge && !isResume) return undefined
+        // 已经有定时器在跑就别重复挂：否则每次重渲染都把计时器推后 1.2s，
+        // 结算期永远走不完（这和「定时器被取消」是同一类症状，只是换了成因）。
+        if (dispatchTimerRef.current !== null) return undefined
+        // 这一轮已经派过（dispatchedRef）：running 会抖，别连派；
+        // 队首已派发但还没 done（reason inflight）：不跳到后面的条目，短重试等回填；
+        // 队列空了：dispatch 自己会返回 empty（这些判定都在 dispatchNext 里）。
         const epoch = dispatchEpochRef.current
+        pendingEdgeRef.current = true
         let started = false
         const timer = window.setTimeout(() => {
           started = true
+          dispatchTimerRef.current = null
+          pendingEdgeRef.current = false
           void dispatchNext(undefined, epoch)
         }, DISPATCH_SETTLE_MS)
+        dispatchTimerRef.current = timer
         return () => {
           // 请求已经发出就别清：prompt 会把 running 拉回 true，cleanup 若把结果扔掉，
           // 下一条其实发出去了，面板却没有任何「已派发」提示。
-          if (!started) window.clearTimeout(timer)
+          if (!started) {
+            window.clearTimeout(timer)
+            if (dispatchTimerRef.current === timer) dispatchTimerRef.current = null
+            // 注意：这里**不清** pendingEdgeRef —— 正是为了让下一轮 effect 能补派。
+          }
         }
       }, [agentRunning, sessionId, cwd, dispatchNext])
-
       /**
        * id=379：「完成后暂停」开关的唯一写入口。放在 dispatchNext 之后定义 ——
        * 它要读 items / runningCount / sync / dispatchNext，全都声明在组件更上面或这一段之前。
@@ -1265,7 +1352,7 @@
         // 两处口径一旦分叉，症状是「拨回继续执行但什么都没发生」——
         // 而 toggle 这边恰恰是唯一会被用户当成「开关坏了」的地方，宁可写得直白些。
         const hasTodo = items.some((it) => {
-          if (it.draft === true) return false
+          // id=405：原来这里先排除草稿项；草稿组移除后不必再判。
           const kids = Array.isArray(it.children) ? it.children : []
           if (kids.length > 0) return kids.every((c) => c.execute === true) !== true
           return it.execute !== true
@@ -1282,6 +1369,8 @@
         }, DISPATCH_SETTLE_MS)
       }
 
+
+
       /** 拖拽落位：只在「待执行」组内调整先后，随后整表重排并落盘。 */
       // 提交一整份「待执行组」的 id 顺序：Host 只认整表顺序，
       // 所以把待执行 → 待审核 → 已审核三段的 id 拼起来发过去，
@@ -1290,7 +1379,7 @@
         const all = state.data?.items ?? []
         const ids = [
           ...order,
-          ...all.filter((it) => it.draft === true).map((it) => it.id),
+          // id=405：草稿段已删（草稿组不存在，没有要排在待执行之前的条目）。
           ...all.filter((it) => it.execute === true && it.review !== true).map((it) => it.id),
           ...all.filter((it) => it.execute === true && it.review === true).map((it) => it.id),
         ]
@@ -1311,7 +1400,7 @@
 
       const moveTo = async (from, to) => {
         if (from === null || to === null || from === to) return
-        const todo = (state.data?.items ?? []).filter((it) => it.execute !== true && it.draft !== true)
+        const todo = (state.data?.items ?? []).filter((it) => it.execute !== true)
         const order = todo.map((it) => it.id)
         const fromIndex = order.indexOf(from)
         const toIndex = order.indexOf(to)
@@ -1324,7 +1413,7 @@
       // 置顶：把这一条挪到「执行中」那条的正下方，即待执行组的第一位。
       // 正在执行的那条永远留在最上面（它是当前正在跑的，不能被打断）。
       const pinTop = async (id) => {
-        const todo = (state.data?.items ?? []).filter((it) => it.execute !== true && it.draft !== true)
+        const todo = (state.data?.items ?? []).filter((it) => it.execute !== true)
         // id=244：拦截放在这里，而不是只靠按钮消失。
         // 置顶的唯一入口虽然是 `50-item.js` 的按钮，但按钮消失只是「看不见入口」，
         // 不是「没有入口」——卡片外层、以后可能加的右键菜单、键盘快捷键，
@@ -1338,66 +1427,34 @@
         order.splice(fromIndex, 1)
         const runningIndex = order.findIndex((x) => {
           const it = todo.find((t) => t.id === x)
-          return it !== undefined && statusOf(it, impliedRunningId === it.id).key === 'running'
+          return it !== undefined && statusOf(it, impliedRunningId === it.id, delivered).key === 'running'
         })
         order.splice(runningIndex >= 0 ? runningIndex + 1 : 0, 0, id)
         await commitOrder(order)
       }
 
-      // 草稿 ⇄ 待执行 的互转：draft 只是条目上的一个布尔标记，
-      // 转换 = 改这个标记，再把这一条挪到目标组末尾（保持组内相对顺序稳定）。
-      // 转成待执行时顺手清掉 startedAt / time，避免带着草稿时期的残留状态进队列。
-      const moveToGroup = async (ids, draft) => {
-        const list = [...new Set(ids)]
-        if (list.length === 0) {
-          setNotice(draft ? '先把要转草稿的项勾上' : '先把要转待执行的草稿勾上')
-          return
-        }
-        setBusy(true)
-        setState((prev) => ({ ...prev, error: '' }))
-        try {
-          for (const id of list) {
-            // id=233：转组时顺手摘掉「已中断」标记 —— 换组意味着用户重新安排了这条，
-            // 再挂着上一次中断的标记会误导（尤其转回待执行时，会一进门就显示「已中断」）。
-            await call('update', {
-              ...payload,
-              id,
-              patch: draft ? { draft: true, interrupted: false } : { draft: false, clearTime: true, interrupted: false },
-            })
-          }
-          // 乐观地把标记先改进本地数据，让条目立刻跳组，避免等 sync 的那一下闪烁。
-          setState((prev) => {
-            if (prev.data === null) return prev
-            const next = (prev.data.items ?? []).map((it) =>
-              list.includes(it.id)
-                ? { ...it, draft: draft, interrupted: false, ...(draft ? {} : { startedAt: '', time: 0 }) }
-                : it,
-            )
-            return { ...prev, data: { ...prev.data, items: next } }
-          })
-          if (draft) setPickedDraft((prev) => new Set())
-          setNotice(draft ? `已转为草稿 ${list.length} 条` : `已转待执行 ${list.length} 条`)
-          // 转待执行后，用户多半接着要开工：把「待执行」组展开，让它看得见。
-          if (!draft) setOpenGroup('todo')
-          await sync()
-        } catch (error) {
-          setState((prev) => ({ ...prev, error: error instanceof Error ? error.message : String(error) }))
-          await sync()
-        } finally {
-          setBusy(false)
-        }
-      }
 
       // 本地打补丁：只就地更新这一条，不重排、不滚动、不改变展开项。
       const patch = async (id, value) => {
-        // 审核通过前先算出「下一个待审核项」：审核完这一条，它就离开待审核组，
-        // 于是自动展开它后面那条，省得用户再点一次。
-        let nextUnreviewed = null
-        if (value.review === true) {
-          const unreviewed = (state.data?.items ?? []).filter((it) => it.execute === true && it.review !== true)
-          const index = unreviewed.findIndex((it) => it.id === id)
-          if (index >= 0 && index + 1 < unreviewed.length) nextUnreviewed = unreviewed[index + 1].id
-        }
+        // id=380：**删掉了「审核通过后自动展开下一条待审核」**。
+        //
+        // 原来这里先算出 nextUnreviewed（审核完这一条就离开待审核组，于是把它后面
+        // 那条设为展开），落盘后再 setOpenId(nextUnreviewed) + setOpenGroup('unreviewed')。
+        //
+        // 为什么要删：审核是一个**逐条扫读**的动作，用户的眼睛停在自己刚点的那一行。
+        // 自动展开下一条会同时做三件用户没要求的事 —— 把下一张卡撑开、把刚审的那张
+        // 收起来、列表整体位移一段。连续点几条时每点一次画面就重排一次，
+        // 很容易点错行；而且「我正在看的那条突然缩起来了」比「要多点一下」更烦人。
+        // 题面也是这个意思：只删自动展开，别的一律不动。
+        //
+        // 删掉之后保留的行为（逐条确认过，都没动）：
+        //   · 数据流转 —— call('update') 与乐观合并（setState 那一段）原样；
+        //   · 列表刷新 —— 用户的通过/取消都照旧生效（合并后重渲染）；
+        //   · 通知 —— `已审核通过 #id` 等提示一字未改；
+        //   · 展开项**失效时的清理** —— 见下面 remainingUnreviewed 那段：
+        //     审完这一条后待审核空了，仍会把正展开的那条摘掉（它已经不在组里了，
+        //     留着展开一个看不见的条目没有意义）。这不是「自动展开」，是清理，
+        //     与题面要删的不是同一件事。
         const silent = value.silent === true
         // silent 是本地开关，别传给宿主（宿主只认 plan/review/draft 这些真实字段）。
         const patchValue = { ...value }
@@ -1422,13 +1479,12 @@
           const remainingUnreviewed = (state.data?.items ?? []).filter(
             (it) => it.execute === true && it.review !== true && it.id !== id,
           ).length
+          // id=380：只保留「摘掉失效的展开项」这一半，自动展开那一支已删除。
+          // setOpenGroup('unreviewed') 也一并没了 —— 它原本只是为「展开下一条」
+          // 服务（保证新展开项所在的分组是打开着的）；既然不再展开，就没有
+          // 「顺手把分组展开」的理由了，否则点一下通过还会把收起的待审核组拽开。
           if (reviewed && remainingUnreviewed === 0) {
             setOpenId(null)
-          } else if (reviewed && nextUnreviewed !== null) {
-            setOpenId(nextUnreviewed)
-            // 展开下一条仍在「待审核」组内，属于原位推进；分组若被手工收起，顺手展开它。
-            // 注意这里**只**展开 unreviewed，绝不碰 'todo'。
-            setOpenGroup('unreviewed')
           }
           if (!silent) {
             setNotice(
@@ -1436,8 +1492,11 @@
                 ? `已审核通过 #${id}`
                 : value.review === false
                   ? `已取消审核 #${id}`
+                  // id=405：这里原来是「已保存草稿 #<id>」—— 它对应的是「就地编辑草稿正文」
+                  // 那条路径（value.plan 是字符串）。草稿编辑框已删除，不再有这种调用，
+                  // 但分支留着会误导（读起来像「还能存草稿」）。改成中性的「已更新正文」。
                   : typeof value.plan === 'string'
-                    ? `已保存草稿 #${id}`
+                    ? `已更新正文 #${id}`
                     : `已更新 #${id}`,
             )
           }
@@ -1470,12 +1529,9 @@
             next.delete(id)
             return next
           })
-          setPickedDraft((prev) => {
-            if (!prev.has(id)) return prev
-            const next = new Set(prev)
-            next.delete(id)
-            return next
-          })
+          // id=405：这里原来还要从 pickedDraft 里剪掉这个 id。
+          // pickedDraft 已随草稿组删除，剩下这一句会在删除任何计划时抛 ReferenceError
+          // （61-F 全目录复查时发现 —— 前面的测试只看语法与引用计数，抓不到运行时未定义）。
           await sync()
           setNotice(`已删除计划 #${id}`)
         } catch (error) {
@@ -1589,7 +1645,7 @@
         }
       }
 
-      /** 批量删除「已审核」/「草稿」组里勾选的条目。正在执行的会被宿主跳过。 */
+      /** 批量删除「已审核」组里勾选的条目。正在执行的会被宿主跳过。 */
       const removePickedDone = async (ids) => {
         if (ids.length === 0) {
           setNotice('先勾选要删除的计划')
@@ -1618,7 +1674,8 @@
             }
           }
           setPickedDone(new Set())
-          setPickedDraft(new Set())
+          // id=405：setPickedDraft(new Set()) 同理已删（草稿组不存在）。
+
           if (openId !== null && removed.includes(openId)) setOpenId(null)
           if (skipped.length > 0) setNotice(`已删除 ${removed.length} 条，${skipped.length} 条执行中跳过`)
           else if (removed.length > 0) setNotice(`已删除 ${removed.length} 条`)
@@ -1633,25 +1690,16 @@
       }
 
       /**
-       * 「待审核自动通过条数」下拉的 change（id=300）。
+       * id=391：「待审核自动通过条数」下拉与它的 change 一起删除了
+       *（题面：取消待审核的自动审核机制，移除代码和下拉选项）。
        *
-       * 写回 → 宿主立刻按新阈值补一轮自动通过 + 归档 → 重读。
-       * `autoApproved` 是这次真被通过掉的 id（宿主回传），有就报一句，
-       * 免得用户看到待审核凭空少了几条却不知道为什么。
+       * 原来这里有 `changeAutoReviewLimit`，写回 `autoReviewLimit` 后宿主会立刻
+       * 补一轮自动通过。现在审核是 100% 人工动作 —— 待审核有多少条就显示多少条，
+       * 不会因为超过某个阈值而悄悄少掉几条。
+       *
+       * 删掉它顺带解决一个老问题：那个下拉是待审核组头里唯一的 `<select>`，
+       * 组头本来就只有一行高，它的 26px 高度一直在给标题施压。
        */
-      const changeAutoReviewLimit = async (value) => {
-        const next = Number(value)
-        await run(async () => {
-          const saved = await call('settings', { ...payload, patch: { autoReviewLimit: next } })
-          const passed = Array.isArray(saved?.autoApproved) ? saved.autoApproved.length : 0
-          setNotice(
-            passed > 0
-              ? `待审核超过 ${next} 条后自动通过 · 本次自动通过 ${passed} 条`
-              : `待审核自动通过：超过 ${next} 条时通过最旧的一条`,
-          )
-          return call('read', { ...payload, lite: true })
-        })
-      }
 
       React.useEffect(() => {
         if (notice === '') return undefined
@@ -1671,16 +1719,15 @@
           const next = new Set([...prev].filter((id) => reviewed.has(id)))
           return next.size === prev.size ? prev : next
         })
-        const drafting = new Set((state.data?.items ?? []).filter((it) => it.draft === true).map((it) => it.id))
-        setPickedDraft((prev) => {
-          const next = new Set([...prev].filter((id) => drafting.has(id)))
-          return next.size === prev.size ? prev : next
-        })
+        // id=405：草稿组的勾选剪枝随草稿组删除（setPickedDraft 已不存在）。
       }, [state.data])
 
       return h(
         'div',
-        { className: 'plt-root', ref: rootRef, style: { position: 'relative' } },
+        // id=71-D：原来这里还带 style: { position: 'relative' } ——
+        // 而 .plt-root 的 CSS 规则里本来就有 position:relative（10-topbar.js），
+        // 内联那份是纯冗余。删掉后定位行为不变。
+        { className: 'plt-root', ref: rootRef },
         h(
           'div',
           // has-error（id=210）：让顶栏那颗「开始 / 暂停」跟着错误提示一起描红，操作失败时不用靠猜。
@@ -1751,16 +1798,102 @@
               },
               showPause
                 ? pausingNow
-                  ? h(SpinnerIcon, { size: 12 })
-                  : h(PauseIcon, { size: 12 })
+                  ? h(SpinnerIcon, { size: 15 })
+                  : h(PauseIcon, { size: 15 })
                 : sending
-                  ? h(SpinnerIcon, { size: 12 })
-                  : h(PlayIcon, { size: 12 }),
-              h('span', null, showPause
+                  ? h(SpinnerIcon, { size: 15 })
+                  : h(PlayIcon, { size: 15 }),
+              // id=88-B：文案单独包一层并带类名，窄屏（≤300px）时整段收起、只留图标。
+              // 类名按当前身份二选一，方便样式分别定位，也方便调试时看出此刻是谁。
+              h('span', { className: showPause ? 'plt-pause-sub' : 'plt-start-sub' }, showPause
                 ? pausingNow ? '暂停中' : '暂停'
                 : sending ? '发送中…' : pausedIdle ? '继续' : '开始'),
             )
           })(),
+        // id=377：「停后」开关 —— 顶栏、紧跟「暂停」按钮之后。
+        //
+        // id=6Gs9v1-A：从待执行组头搬到这里。原先放组头是因为「最右端已被条数
+        // 统计占着，插一个宽度会变的开关会打散那条对齐线」；搬到顶栏后这个顾虑
+        // 不再存在，顶栏本来就是一行动作按钮。
+        //
+        // 显隐：**只在有任务正在执行时渲染**，判据是
+        // `agentRunning === true || pausing === true` —— 与相邻那颗「暂停」按钮
+        // 的 showPause 表达式完全一致，所以两者永远同进同出。
+        //（注意：不能用组头那个 `isRunning`，它活在 groups.map 的闭包里，顶栏读不到；
+        //  也不能用 `showPause`，它定义在下面那个 IIFE 内部。这两次都是踩过的坑。）
+        //
+        // 文案（id=6Gs9v1-C）：关闭态「停后」，开启态「继续」——
+        // **都是 2 字**，与「开始」「暂停」「继续」「刷新」「自动」同一节奏。
+        // 之前是「完成后暂停」(5 字) /「继续执行」(4 字)，一行里混着 2 字和 5 字，
+        // 视觉上像「一排按钮旁边挂了个标签」。
+        // 短文案省下的字由下面的 title 补回来。
+        //
+        // title（题面要求逐字）：解释这个开关到底做什么。
+        // 同时也用 data-tip —— 这个插件的气泡提示统一走 40-tip.js，
+        // 只有 title 的话悬停要等浏览器那个 ~1s 的延迟。
+        //
+        // ⚠ 判据用 showPause，**不是 isRunning**。
+        // 搬家时这一行原本照抄了组头的 `isRunning`，但那是分组遍历里的局部变量
+        //（定义在下面 `const isRunning = group.list.some(...)`，属于组头那个闭包），
+        // 顶栏作用域根本看不到它 —— 直接渲染就抛 `isRunning is not defined`，
+        // 整个插件白屏。这是搬家时**只搬了代码、没搬依赖**的典型事故。
+        //
+        // 顶栏里与「正在跑」等价的是 showPause（agentRunning || pausing），
+        // ⚠ 判据必须是**顶栏作用域里真能读到的东西**。
+        //
+        // 搬家时这一行原本照抄了组头的 `isRunning`，但那是分组遍历里的局部变量
+        //（`const isRunning = group.list.some(...)`，活在组头那个闭包里），
+        // 顶栏看不到它 —— 一渲染就抛 `isRunning is not defined`，整个插件白屏。
+        //
+        // 也不能用 `showPause`：它定义在下面那个 IIFE 的**内部**，出了 `})()` 就没了。
+        //（我第二次改正是这么写的，同样是 out-of-scope，只是报错点换了个地方。）
+        //
+        // 顶栏这里能直接读的组件级 state 只有 agentRunning / pausing。
+        // 判据取 `agentRunning === true || pausing === true` —— 与 IIFE 里 showPause
+        // 的表达式**完全一致**，所以「暂停按钮显示着」与「开关出现」永远同进同出。
+        (agentRunning === true || pausing === true)
+          ? h(
+              'button',
+              {
+                // id=6Gs9v1-B：**直接复用 .plt-btn** —— 与相邻的「开始/暂停」同一套
+                // 高度 / 圆角 / 字号 / 内边距 / 换行规则，不再自己定一份尺寸。
+                // .plt-auto-pause 只保留它独有的部分（开关配色、圆点、on 态），
+                // 尺寸与形状一律交给 .plt-btn，两边永远不会走散。
+                className: `plt-btn plt-auto-pause${pauseAfterDone ? ' on' : ''}`,
+                type: 'button',
+                // 组头整行是展开/收起的热区，开关必须自己吃掉点击。
+                // id=379：走统一写入口 —— 它同步写 ref（派发回调读的是 ref），
+                // 并在拨回「继续执行」时立刻恢复派发。
+                onClick: (e) => {
+                  e.stopPropagation()
+                  togglePauseAfterDone()
+                },
+                // id=6Gs9v1-C：**文案统一改成两字**，与同组按钮同节奏。
+                //
+                // 原先是「完成后暂停」（5 字）/「继续执行」（4 字），而旁边的
+                // 「开始」「暂停」「继续」「刷新」「自动」全是 2 字 —— 一行里
+                // 混着 2 字和 5 字，视觉上是「一排按钮 + 一个标签」，不像同类控件。
+                //
+                // 新文案：关 =「停后」（停止后续）、开 =「继续」。
+                // 两者都 2 字，与「暂停」等长；含义靠下面这条 title 兜住。
+                // 「停后」单独看略省略，所以 title 必须写清「停的是什么」——
+                // 这也是题面要求「同步更新 title / aria-label」的原因：
+                // 短文案省下的字，要在说明里补回来。
+                title: '开启后：当前任务执行完就停下，不再自动派发下一条（「继续」可恢复）',
+                'data-tip': '开启后：当前任务执行完就停下，不再自动派发下一条（「继续」可恢复）',
+                // aria-label 用完整语义，读屏用户没有视觉上下文，
+                // 不跟着按钮表面那两个字走。
+                'aria-label': '完成后停止后续任务',
+                // 读屏要的是「当前是开还是关」，不能只靠文案变化
+                //（「停后 / 继续」两种文案都不是 on/off 本身）。
+                'aria-pressed': pauseAfterDone === true,
+              },
+              // 小圆点承担开关状态：与顶栏那颗「自动刷新」（.plt-auto .plt-dot）
+              // 同一套视觉语言 —— 亮起 = 开，灰点 = 关。不新造一个 toggle 皮肤。
+              h('span', { className: 'plt-dot', 'aria-hidden': 'true' }),
+              h('span', { className: 'plt-auto-pause-txt' }, pauseAfterDone ? '继续' : '停后'),
+            )
+          : null,
         ),
         state.error !== '' ? h('div', { className: 'plt-err' }, state.error) : null,
         // 「确实没有可用模型」的引导条（id=364）。
@@ -1828,56 +1961,138 @@
                       // 刚通过的一条反而沉到下面去了。改成按 finishedAt 显式排序，
                       // 与来源顺序解耦；老条目缺 finishedAt 时退到 createdAt、再退到 id。
                       // 拆解批次用 children 里最晚的完成时间（整批审完的那一刻才算完成）。
-                      const reviewedTimeOf = (it) => {
-                        const kids = Array.isArray(it.children) ? it.children : []
-                        const pool = kids.length > 0 ? kids : [it]
-                        const times = pool.map((one) => {
-                          const done = typeof one?.finishedAt === 'string' ? Date.parse(one.finishedAt) : NaN
-                          if (Number.isFinite(done)) return done
-                          const born = typeof one?.createdAt === 'string' ? Date.parse(one.createdAt) : NaN
-                          return Number.isFinite(born) ? born : 0
-                        })
-                        return times.length === 0 ? 0 : Math.max(...times)
+                      /**
+                       * 列表排序口径（id=77-C）：**只由 order 决定**。
+                       *
+                       * order 升序；order 相同时按 id 的**字符串**比较兜底。
+                       *
+                       * 为什么不用 `a.id - b.id` / `Number(id.split('-')[0])`：
+                       * 77-B 之后 id 是 6 位随机串，两种写法都会得到 NaN，
+                       * 而 NaN 参与的比较不满足反对称性 —— 排序结果「未定义」。
+                       *
+                       * 为什么删掉原来的时间戳排序：
+                       * 已审核组原来按 finishedAt 降序（最近完成的在上）、待审核组按
+                       * startedAt 升序（先完成的在上），都写了不少注释解释「为什么要
+                       * 按时间而不按来源顺序」。但那是「用时间模拟一个顺序」——
+                       * 而顺序本来就应该由 order 这个字段唯一决定，否则同一份数据
+                       * 在不同时间点刷新会排出不同结果。
+                       * 现在统一按 order：用户拖成什么样，就是什么样。
+                       */
+                      const byTaskOrder = (a, b) => {
+                        const oa = Number.isFinite(a?.order) ? Number(a.order) : 0
+                        const ob = Number.isFinite(b?.order) ? Number(b.order) : 0
+                        if (oa !== ob) return oa - ob
+                        const ia = String(a?.id ?? '')
+                        const ib = String(b?.id ?? '')
+                        if (ia === ib) return 0
+                        return ia < ib ? -1 : 1
                       }
-                      const reviewedRank = (it) => {
-                        const head = Number(String(it?.id ?? '').split('-')[0])
-                        return Number.isFinite(head) ? head : 0
+                      // id=6-A：**已审核组恢复「审核时间倒序」**（最新审核的在最上）。
+                      //
+                      // 这条要求与 id=338 同一个诉求 —— 338 当初就实现了它，
+                      // 后来 id=77-C 把三组排序统一成 `byTaskOrder`（order 升序），
+                      // 顺带把这段删了。现在按本条恢复，但**只对已审核组生效**，
+                      // 另外两组保持 byTaskOrder（用户拖拽的顺序不受影响）。
+                      //
+                      // 为什么已审核组要特殊：它的顺序对用户没有操作意义
+                      //（已审核条目不可拖拽，drag: false），用户翻它是想找「刚审的」，
+                      // 而 order 是提交时分配的，跟审核先后无关 —— 按 order 排会让
+                      // 刚审完的一条沉到中间。
+                      //
+                      // 时间口径（沿用 338 的设计）：
+                      //   finishedAt ──> createdAt ──> id 字符串
+                      // finishedAt 是「审核通过那一刻」的权威字段（见 archive.js:37）。
+                      // 拆解批次取 children 里**最晚**的完成时间 —— 整批审完才算这条完成。
+                      const reviewedTimeOf = (it) => {
+                        const pick = (x) => {
+                          const f = Date.parse(String(x?.finishedAt ?? ''))
+                          if (Number.isFinite(f)) return f
+                          const c = Date.parse(String(x?.createdAt ?? ''))
+                          return Number.isFinite(c) ? c : null
+                        }
+                        const kids = Array.isArray(it?.children) ? it.children : []
+                        // 拆解批次：取最晚完成的那个子任务
+                        if (kids.length > 0) {
+                          const times = kids.map(pick).filter((x) => x !== null)
+                          if (times.length > 0) return Math.max(...times)
+                        }
+                        return pick(it)
+                      }
+                      /** 已审核组：审核时间倒序；都没有时间时退回 id 倒序。 */
+                      const byReviewedDesc = (a, b) => {
+                        const ta = reviewedTimeOf(a)
+                        const tb = reviewedTimeOf(b)
+                        // 有时间的一律排在没时间的之前（没时间的沉底，不占顶部）
+                        if (ta !== null && tb !== null && ta !== tb) return tb - ta
+                        if (ta !== null && tb === null) return -1
+                        if (ta === null && tb !== null) return 1
+                        // 都无时间（或同一毫秒）：id 倒序兜底，保证顺序稳定
+                        const ia = String(a?.id ?? '')
+                        const ib = String(b?.id ?? '')
+                        if (ia === ib) return 0
+                        return ia > ib ? -1 : 1
                       }
                       const doneReviewed = items
                         .filter((it) => {
                           const batch = batchOf(it)
-                          if (batch !== null) return batch.allReviewed && it.draft !== true
-                          return it.execute === true && it.review === true && it.draft !== true
+                          if (batch !== null) return batch.allReviewed
+                          return it.execute === true && it.review === true
                         })
-                        .sort((a, b) => reviewedTimeOf(b) - reviewedTimeOf(a) || reviewedRank(b) - reviewedRank(a))
+                        // id=6-A：排序作用在 **filter 之后的完整数据集** 上。
+                        // 本组件没有分页/截断（全项目搜不到 slice/limit 分页），
+                        // 所以「先排全量再渲染」天然成立，不存在「只排当前页」的问题。
+                        .sort(byReviewedDesc)
+                      // 待审核组同样按 byTaskOrder（order 升序 + id 字符串兜底）。
+                      //
+                      // id=77-C 删掉了这里的 pendingTimeOf / pendingRank：
+                      // 那套按 startedAt → createdAt 排序是为了解决 id=403 报的
+                      // 「待审核继承了归档的倒序、后完成的反而在上面」——
+                      // 但那是**用时间模拟一个顺序**。现在顺序由 order 唯一决定，
+                      // 「先完成的在上」变成「用户拖成什么样就是什么样」，
+                      // 同一份数据在任何时间点刷新都排出同样结果。
+                      //
+                      // 已审核组同理（原 reviewedTimeOf 按 finishedAt 降序）。
+                      // 两个组现在共用同一个比较器，不再一个倒序一个正序 ——
+                      // 那种"方向差异"本身就是用时间当排序依据的副作用。
                       const donePending = items.filter((it) => {
                         const batch = batchOf(it)
-                        if (batch !== null) return batch.allDone && batch.allReviewed !== true && it.draft !== true
-                        return it.execute === true && it.review !== true && it.draft !== true
-                      })
-                      // 草稿单独成组（绿色、最靠下、贴着输入框）；没有草稿时整组不显示。
-                      const draftList = items.filter((it) => it.draft === true)
+                        if (batch !== null) return batch.allDone && batch.allReviewed !== true
+                        return it.execute === true && it.review !== true
+                      // 正序：时间早的在前；同一时刻用 id 递增兜底，保证顺序稳定
+                      //（不稳定排序会让两条同时间戳的条目在每次轮询时互换位置）。
+                      }).sort(byTaskOrder)
+                      // id=405：草稿组已移除，待执行组不再需要排除草稿条目。
                       const todoList = items.filter((it) => {
-                        if (it.draft === true) return false
                         const batch = batchOf(it)
                         if (batch !== null) return batch.allDone !== true
                         return it.execute !== true
                       })
+                      // id=381：这里原来每个组还带一个 `defaultOpen` 字段
+                      //（reviewed/unreviewed: false，todo/draft: true），但**全项目没有任何地方读它** ——
+                      // 是个死字段。
+                      //
+                      // 为什么要删掉而不是留着：它长得就像「默认展开某个组」的初始化写法，
+                      // 而实际生效的默认值只有一处 —— openGroup 的 useState 初值（见组件顶部）。
+                      // 两处并存时，后来的人改完 `defaultOpen` 发现没反应，才会去翻真正的初值；
+                      // 更糟的是照着它的语义去「修」，把 `unreviewed: true` 改成 true 期待
+                      // 首个待审核项自动展开 —— 于是又造出本条要清掉的那种行为。
+                      // 展开态只有一个来源：openGroup（组）与 openId（条目），
+                      // 两者的初值都必须是 null（无默认展开项）。
                       const groups = [
-                        { key: 'reviewed', title: '已审核', list: doneReviewed, defaultOpen: false, drag: false, alwaysShow: false, emptyText: '还没有审核通过的计划' },
-                        { key: 'unreviewed', title: '待审核', list: donePending, defaultOpen: false, drag: false, alwaysShow: true, emptyText: '暂无待审核内容' },
-                        { key: 'todo', title: '待执行', list: todoList, defaultOpen: true, drag: true, alwaysShow: true, emptyText: '待执行里没有计划，在下面的输入框写一条。' },
-                        { key: 'draft', title: '草稿', list: draftList, defaultOpen: true, drag: false, alwaysShow: false, emptyText: '' },
+                        { key: 'reviewed', title: '已审核', list: doneReviewed, drag: false, alwaysShow: false, emptyText: '还没有审核通过的计划' },
+                        { key: 'unreviewed', title: '待审核', list: donePending, drag: false, alwaysShow: true, emptyText: '暂无待审核内容' },
+                        { key: 'todo', title: '待执行', list: todoList, drag: true, alwaysShow: true, emptyText: '待执行里没有计划，在下面的输入框写一条。' },
+                        // id=405：草稿组已移除（题面：界面不再出现任何草稿相关元素）。
                       ]
                       const renderItem = (item, dragEnabled, groupKey) => {
-                        // 「待审核」「已审核」「草稿」三组支持勾选：分别用于批量审核、
-                        // 批量删除、批量转待执行。正在执行的条目任何组都不参与勾选。
+                        // 「待审核」「已审核」两组支持勾选：分别用于批量审核、批量删除。
+                        // id=405：草稿组移除后，「批量转待执行」这个用途也不存在了。
+                        // 正在执行的条目任何组都不参与勾选。
                         const selectable =
-                          (groupKey === 'unreviewed' || groupKey === 'reviewed' || groupKey === 'draft') &&
-                          statusOf(item).key !== 'running'
-                        const pickedSet = groupKey === 'reviewed' ? pickedDone : groupKey === 'draft' ? pickedDraft : picked
-                        const setPickedSet =
-                          groupKey === 'reviewed' ? setPickedDone : groupKey === 'draft' ? setPickedDraft : setPicked
+                          (groupKey === 'unreviewed' || groupKey === 'reviewed') &&
+                          statusOf(item, false, delivered).key !== 'running'
+                        const pickedSet = groupKey === 'reviewed' ? pickedDone : picked
+                        const setPickedSet = groupKey === 'reviewed' ? setPickedDone : setPicked
                         return h(Item, {
                           key: item.id,
                           item,
@@ -1891,6 +2106,8 @@
                           selectable,
                           // 所属分组，决定「复制 ID / 复制内容」这类组内专属按钮是否出现。
                           groupKey,
+                          // id=89-D：派发记录透传给行组件 —— 「执行中」要靠它与 id 关联判定。
+                          delivered,
                           // 置顶按钮只出现在待执行组，且拆分出来的子任务不给（id=243）。
                           // 判定依据只能是 `decomposeKey`：`[拆] ` 是宿主拼在 name 上的文案，
                           // 用户改个名就骗过去了，而 key 是落盘事实（宿主 `dedupeKeyOf` 生成）。
@@ -1902,27 +2119,12 @@
                           // 只传 id，遍历 children 与收尾都在 approveBatch 里做 ——
                           // 按钮本身保持哑组件，不自己算「这一批还剩几条」。
                           onApproveBatch: (batchId) => void approveBatch(batchId),
-                          // 草稿组专属：单条「转为待执行」+ 正文可直接编辑。
-                          // 草稿组里的父节点给「转为待执行」：整批一起出草稿（宿主按 id 改父）。
-                          onPromote: () => void moveToGroup([item.id], false),
-                          // 待执行里还没开工的才允许退回草稿（执行中不给）。
-                          // 父节点（拆解批次）不给「转为草稿」：它的草稿态是整批的落点，
-                          // 单条父退回草稿要连带处理 children，宿主没有这个语义（id=273）。
-                          // 待执行里还没开工的条目可以退回草稿（执行中不给）。
-                          //
-                          // id=376：**去掉「批次不给」这条限制**。原来这里还要求
-                          // `!(item.children?.length > 0)` —— 也就是拆解批次不能转草稿。
-                          // 题面要求「拆分的与单任务都转到头部」，而这颗按钮要挪到头部，
-                          // 若继续排除批次，批次卡的头部就永远少一颗，两种卡的位置又不一致了。
-                          //
-                          // 放开是安全的：`moveToGroup` 打的是 `{ draft: true }`，
-                          // 而 `statusOf` 对父节点是「草稿优先」—— 整批被标 draft 后，
-                          // 即使子任务都做完了也判为草稿，不会被「整批做完 = 待审核」洗掉。
-                          // 子任务自己不带 draft（它们是父的一部分），所以不存在
-                          // 「父进了草稿、子还在待执行」的错位。
-                          canDemote: groupKey === 'todo' && statusOf(item, impliedRunningId === item.id).key === 'todo',
-                          onDemote: () => void moveToGroup([item.id], true),
-                          editable: groupKey === 'draft',
+                          // id=405：草稿模式整体移除后，这里原本的两组 prop 一并删掉：
+                          //   · onPromote（草稿组专属「转为待执行」）
+                          //   · canDemote / onDemote（待执行里的「转为草稿」）
+                          // 它们的来源/目的地都是草稿组，草稿没了就不存在可转的组。
+                          // 同时删掉 `editable: groupKey === 'draft'` —— 它只对草稿组为 true，
+                          // 而草稿组已不存在，留着是一个永远为 false 的死 prop。
                           // 会话在跑但这条还没写 startedAt：先按「执行中」显示。
                           impliedRunning: impliedRunningId === item.id,
                           // 三组都不再显示「已执行」只读勾选框：待执行还没跑，待审核/已审核必然已执行。
@@ -1940,17 +2142,39 @@
                           },
                           dragging: dragId === item.id,
                           dropTarget: dropId === item.id && dragId !== null && dragId !== item.id,
+                          // id=397：刚落下的那一条（播回弹确认）。
+                          dropped: droppedId === item.id,
                           onDragStart: () => {
                             setDragId(item.id)
                             setDropId(null)
+                            // 新一次拖拽开始：把上一次的回弹状态与它的 timer 都清掉，
+                            // 否则上一记回弹会在这里被打断（观感是「刚放下又抖一下」）。
+                            if (droppedTimerRef.current !== null) {
+                              window.clearTimeout(droppedTimerRef.current)
+                              droppedTimerRef.current = null
+                            }
+                            setDroppedId(null)
                           },
                           onDragOver: () => {
                             if (dragId !== null && dragId !== item.id) setDropId(item.id)
                           },
                           onDrop: () => {
+                            // 松手的这一条要播「已落下」回弹（id=397）。
+                            // 注意顺序：先记 droppedId 再清 dragId/dropId ——
+                            // 三个 state 在同一次事件里批量更新，React 会合成一次渲染，
+                            // 所以不存在「先渲染出没有 droppedId 的中间态」的问题。
+                            const landed = item.id
                             void moveTo(dragId, item.id)
                             setDragId(null)
                             setDropId(null)
+                            if (droppedTimerRef.current !== null) window.clearTimeout(droppedTimerRef.current)
+                            setDroppedId(landed)
+                            // 320ms 与 CSS 里 plt-dropped 的时长对齐（略多 20ms 余量，
+                            // 保证动画先播完再摘类，避免它被截断在半途）。
+                            droppedTimerRef.current = window.setTimeout(() => {
+                              droppedTimerRef.current = null
+                              setDroppedId(null)
+                            }, 340)
                           },
                           onDragEnd: () => {
                             setDragId(null)
@@ -1975,15 +2199,13 @@
                           // 与卡片上那个「执行中」标签逐条对齐（含 impliedRunning 那一条）。
                           // 必须挂在组容器上：收起时组内卡片整块不渲染，后代选择器无从判断（见 id=237 定位）。
                           // 刻意不含 starting：刚点下「开始」、模型还没接手的那几秒组里一条执行中的都没有。
-                          const isRunning = group.list.some((it) => statusOf(it, impliedRunningId === it.id).key === 'running')
+                          const isRunning = group.list.some((it) => statusOf(it, impliedRunningId === it.id, delivered).key === 'running')
                           const pendingIds = group.key === 'unreviewed' ? group.list.map((item) => item.id) : []
                           const allPicked = pendingIds.length > 0 && pendingIds.every((id) => picked.has(id))
                           // 「已审核」组同样支持勾选，用于批量删除。
                           const doneIds = group.key === 'reviewed' ? group.list.map((item) => item.id) : []
                           const allPickedDone = doneIds.length > 0 && doneIds.every((id) => pickedDone.has(id))
-                          // 「草稿」组也支持勾选：批量转待执行 / 批量删除。
-                          const draftIds = group.key === 'draft' ? group.list.map((item) => item.id) : []
-                          const allPickedDraft = draftIds.length > 0 && draftIds.every((id) => pickedDraft.has(id))
+                          // （id=405：草稿组的勾选与批量操作已随草稿模式删除。）
                           return h(
                             'div',
                             { key: group.key, className: `plt-group plt-group-${group.key}${isOpen ? ' open' : ''}${isRunning ? ' is-running' : ''}`, 'data-running': isRunning ? 'true' : 'false' },
@@ -1996,51 +2218,6 @@
                               },
                               h('span', { className: 'plt-caret' }, h(CaretIcon, { size: 13 })),
                               h('span', { className: 'plt-group-name' }, group.title),
-                              // id=377：「完成后暂停」开关 —— 组头**左侧**、紧跟组名之后。
-                              //
-                              // 为什么放在这个位置而不是最右端：最右端已经被条数统计占着
-                              //（id=337 刻意压在所有控件之后，让各组的数字竖着对齐），
-                              // 往那里插一个宽度会变的开关，等于把那条对齐线打散。
-                              // 放在组名右侧，读起来是「干活中 · 完成后暂停」，一句话。
-                              //
-                              // 显隐（题面）：**只在「干活中」有任务正在执行时渲染**，
-                              // 无执行中任务时整块不显示。判据用 isRunning（与组容器上
-                              // 那个 data-running、以及收起态那句「正在执行」同一个口径），
-                              // 不另算一套，否则会出现「组头说在跑、开关却不出现」的矛盾。
-                              //
-                              // 文案：关闭态「完成后暂停」，开启态「继续执行」。
-                              // 开启后说的不再是「要不要暂停」而是「接下来会怎样」——
-                              // 开关已经拨过去了，再重复一遍动作没有信息量。
-                              //
-                              // title（题面要求逐字）：解释这个开关到底做什么。
-                              // 同时也用 data-tip —— 这个插件的气泡提示统一走 40-tip.js，
-                              // 只有 title 的话悬停要等浏览器那个 ~1s 的延迟。
-                              group.key === 'todo' && isRunning
-                                ? h(
-                                    'button',
-                                    {
-                                      className: `plt-auto-pause${pauseAfterDone ? ' on' : ''}`,
-                                      type: 'button',
-                                      // 组头整行是展开/收起的热区，开关必须自己吃掉点击。
-                                      // id=379：走统一写入口 —— 它同步写 ref（派发回调读的是 ref），
-                                      // 并在拨回「继续执行」时立刻恢复派发。
-                                      onClick: (e) => {
-                                        e.stopPropagation()
-                                        togglePauseAfterDone()
-                                      },
-                                      title: '开启后当前任务执行完不再自动派发下一个任务，关闭则继续自动派发',
-                                      'data-tip': '开启后当前任务执行完不再自动派发下一个任务，关闭则继续自动派发',
-                                      'aria-label': '完成后暂停',
-                                      // 读屏要的是「当前是开还是关」，不能只靠文案变化
-                                      //（「完成后暂停 / 继续执行」两种文案都不是 on/off 本身）。
-                                      'aria-pressed': pauseAfterDone === true,
-                                    },
-                                    // 小圆点承担开关状态：与顶栏那颗「自动刷新」（.plt-auto .plt-dot）
-                                    // 同一套视觉语言 —— 亮起 = 开，灰点 = 关。不新造一个 toggle 皮肤。
-                                    h('span', { className: 'plt-dot', 'aria-hidden': 'true' }),
-                                    h('span', { className: 'plt-auto-pause-txt' }, pauseAfterDone ? '继续执行' : '完成后暂停'),
-                                  )
-                                : null,
                               // id=337：条数统计挪到组头最右端（所有控件之后），
                               // 读数固定补足三位（001 / 012 / 123）—— 组与组之间同一位置、
                               // 同一宽度，展开收起时右边界不会跟着数字位数来回跳。
@@ -2055,25 +2232,12 @@
                                     h('span', { className: 'plt-group-run-txt' }, '正在执行'),
                                   )
                                 : null,
-                              // 「待审核超过 N 条自动通过最旧一条」的条数（id=300）。
-                              // 档位由宿主下发的 noteLimits 决定。已审核不再按条数删除，所以这个下拉只出现在待审核。
-                              group.key === 'unreviewed' && Array.isArray(state.data?.noteLimits)
-                                ? h(
-                                    'select',
-                                    {
-                                      className: 'plt-limit',
-                                      value: String(state.data?.settings?.autoReviewLimit ?? 200),
-                                      disabled: busy,
-                                      'aria-label': '待审核自动通过的条数',
-                                      'data-tip': '待审核超过这个条数时，自动通过最旧的一条，并搬进已审核。已审核会一直保留',
-                                      onClick: (e) => e.stopPropagation(),
-                                      onChange: (e) => void changeAutoReviewLimit(e.target.value),
-                                    },
-                                    state.data.noteLimits.map((n) =>
-                                      h('option', { key: String(n), value: String(n) }, String(n)),
-                                    ),
-                                  )
-                                : null,
+                              // id=391：「待审核超过 N 条自动通过最旧一条」的下拉已删除
+                              //（题面：取消自动审核机制 + 移除下拉选项）。
+                              // 待审核组头现在只剩「条数统计」，不再有阈值控件。
+                              // 组头因此回归到「名字 + 统计」这一种形状，与其它三组一致 ——
+                              // 原来只有待审核组头有一个 <select>，那一行的高度和留白都
+                              // 跟别的组对不上，收敛后整列终于齐了。
                               // id=337：条数统计压在所有控件之后（最右端），补足三位。
                               // 放最后而不是紧跟组名：下拉 / 提示 / 备份开关的长短各不相同，
                               // 数字挂在组名后面时每一组的位置都不一样，扫视时对不齐。
@@ -2161,54 +2325,8 @@
                                           ),
                                         )
                                       : null,
-                                    // 「草稿」组底部一排操作：全选 + 全部删除 + 批量「转待执行」。
-                                    group.key === 'draft'
-                                      ? h(
-                                          'div',
-                                          { className: 'plt-bulk' },
-                                          h(
-                                            'label',
-                                            { className: 'plt-check', 'data-tip': allPickedDraft ? '取消全选' : '全选本组全部' },
-                                            h('input', {
-                                              type: 'checkbox',
-                                              checked: allPickedDraft,
-                                              disabled: busy,
-                                              onChange: (e) => {
-                                                if (e.target.checked) setPickedDraft(new Set(draftIds))
-                                                else setPickedDraft(new Set())
-                                              },
-                                            }),
-                                            h('span', null, '全选'),
-                                          ),
-                                          h('span', { className: 'plt-bulk-count' }, pickedDraft.size > 0 ? `已选 ${pickedDraft.size}` : ''),
-                                          h(
-                                            'button',
-                                            {
-                                              className: 'plt-btn plt-bulk-del',
-                                              disabled: busy || pickedDraft.size === 0,
-                                              'data-tip': '把勾选的草稿一次性删除',
-                                              onClick: (e) => {
-                                                e.stopPropagation()
-                                                void removePickedDone([...pickedDraft])
-                                              },
-                                            },
-                                            '全部删除',
-                                          ),
-                                          h(
-                                            'button',
-                                            {
-                                              className: 'plt-btn plt-bulk-promote',
-                                              disabled: busy || pickedDraft.size === 0,
-                                              'data-tip': '把勾选的草稿一次性转为待执行',
-                                              onClick: (e) => {
-                                                e.stopPropagation()
-                                                void moveToGroup([...pickedDraft], false)
-                                              },
-                                            },
-                                            '转待执行',
-                                          ),
-                                        )
-                                      : null,
+                                    // id=405：草稿组底部那排操作（全选 / 全部删除 / 转待执行）
+                                    // 随草稿组一并删除 —— 三个动作的对象都是草稿条目。
                                     // 「待执行」组底部固定一排操作：待执行存在时提供「开始干活」。
                                     // 点了才把提示词发进左侧会话，写完计划不再自动开工。
                                     // 只要模型在跑（会话 running / 某条已写 startedAt / 刚点下去），
@@ -2330,7 +2448,10 @@
                               className: `plt-chip plt-chip-split${splitMode ? ' active' : ''}`,
                               disabled: busy || splitting,
                               'aria-pressed': splitMode ? 'true' : 'false',
-                              'aria-label': '拆解模式（叠加开关，可与其他任务类型同时生效）',
+                              // id=5-D：原文是「叠加开关，可与其他任务类型同时生效」——
+                              // 说对了能同时开，但没说清叠加**只改文本深度、不改条数**。
+                              // 与深入开关那条 tip 保持同一口径，避免两个按钮各说各话。
+                              'aria-label': '拆解模式（可与深入模式同时开启；深入只影响每条写多深，不影响拆成几条）',
                               // id=363：气泡里带上「这一拆会用哪个模型」。拆解是唯一真调模型的动作，
                               // 而模型的选择以前完全不可见 —— 用户只能靠「拆出来才知道」。
                               // 目录还没回来（modelState.selection 为 null）时这句不出现，
@@ -2340,8 +2461,8 @@
                                   ? ''
                                   : `（模型 ${modelState.selection.model}）`
                                 return splitMode
-                                  ? `拆解模式已开启：发送时按项目情况自动拆成多条，落在「${draftMode ? '草稿' : '待执行'}」${who}（点击关闭）`
-                                  : `开启拆解模式：发送时按项目情况把这段话拆成几条${draftMode ? '草稿' : '待执行任务'}${who}`
+                                  ? `拆解模式已开启：发送时按项目情况自动拆成多条，落在「待执行」${who}（点击关闭）`
+                                  : `开启拆解模式：发送时按项目情况把这段话拆成几条待执行任务${who}`
                               })(),
                               onClick: () => setSplitMode(!splitMode),
                             },
@@ -2353,7 +2474,7 @@
                       return nodes
                     })(),
                   ),
-                  // 深入开关（在草稿开关左侧，同款圆形造型）：默认不选中；
+                  // 深入开关（发送键左侧的圆形按钮）：默认不选中；
                   // 点亮后「发送」会把输入框里的任务改写为「要求做深」的提示词。
                   // id=262：草稿模式下深入本来就不生效（草稿只存原话），以前按钮照样能点、
                   // tip 照样承诺「会改写」，用户点了却发现什么都没变。现在直接置灰并说明原因。
@@ -2362,54 +2483,43 @@
                     {
                       type: 'button',
                       className: `plt-deep-toggle${deepMode ? ' on' : ''}`,
-                      disabled: busy || draftMode,
+                      disabled: busy,
                       'aria-pressed': deepMode ? 'true' : 'false',
-                      'aria-disabled': draftMode ? 'true' : undefined,
-                      'data-tip': draftMode
-                        ? '草稿模式只存原话、不改写提示词，先关掉草稿才能用深入模式'
-                        : deepMode
+                      // id=405：原来这里还会因为「草稿模式」置灰 —— 草稿只存原话、深入会改写，
+                      // 两者互斥。草稿模式移除后这条互斥消失，深入开关只剩 busy 一个禁用条件。
+                      // id=5-D：两个开关同时点亮时，用户最容易误以为「叠加会让拆出来的条数变多」。
+                      // 实测（见 docs/toggle-combo-result.md）：条数只由 DECOMPOSE_MIN/SOFT_MAX 决定，
+                      // deep 完全不参与；叠加的唯一效果是「每条写得更深」。这句必须说清，
+                      // 否则用户点完两个开关、发现还是那几条，会以为开关坏了。
+                      'data-tip': deepMode
                           ? splitMode
-                            ? '深入模式已开启：拆解时要求把每一条子任务都做深（点击关闭）'
+                            ? '深入模式已开启：拆解时要求把每一条子任务都做深；拆成几条不受它影响（点击关闭）'
                             : '深入模式已开启：发送时会改写提示词，要求把任务做深（点击关闭）'
                           : splitMode
-                            ? '开启深入模式：拆解时要求把每一条子任务都做深'
+                            ? '开启深入模式：拆解时要求把每一条子任务都做深；拆成几条不受它影响'
                             : '开启深入模式：发送时自动把任务改写成「做深而不是做大」的提示词',
-                      'aria-label': '深入模式',
+                      // 读屏拿不到上面的长句，这里把叠加语义也带上
+                      'aria-label': deepMode ? '深入模式（已开启）' : '深入模式',
                       onClick: () => setDeepMode(!deepMode),
                     },
                     h(DeepIcon, { size: 15 }),
                   ),
-                  // 草稿开关（id=106：放在发送按钮左侧，发送键同款圆形造型）：
-                  // 平时灰圈不点亮；点亮后「发送」不再进待执行，而是把这条推到「草稿」组。
-                  h(
-                    'button',
-                    {
-                      type: 'button',
-                      className: `plt-draft-toggle${draftMode ? ' on' : ''}`,
-                      disabled: busy,
-                      'aria-pressed': draftMode ? 'true' : 'false',
-                      'data-tip': draftMode
-                        ? '草稿模式已开启：发送将存入「草稿」组（点击关闭）'
-                        : '开启草稿模式：发送不再排入待执行，只存进「草稿」组',
-                      'aria-label': '草稿模式',
-                      onClick: () => setDraftMode(!draftMode),
-                    },
-                    h(DraftIcon, { size: 15 }),
-                  ),
+                  // id=405：草稿开关按钮（plt-draft-toggle）已删除 ——
+                  // 它是草稿模式的唯一入口，草稿组不存在后这个开关没有落点。
                   h(
                     'button',
                     {
                       type: 'button',
                       className: 'plt-send',
                       disabled: busy || splitting,
+                      // id=405：草稿模式移除后，发送键的文案回到单一含义 ——
+                      // 拆解模式说「拆解成多条」，否则说「提交」。
                       'data-tip': splitting
                         ? '正在拆解，请稍候…'
                         : splitMode
-                          ? `拆解成多条，落在「${draftMode ? '草稿' : '待执行'}」（Shift+Enter）`
-                          : draftMode
-                            ? '存入草稿（Shift+Enter）'
-                            : '提交（Shift+Enter）',
-                      'aria-label': splitMode ? (draftMode ? '拆解成草稿' : '拆解成待执行') : draftMode ? '存入草稿' : '提交计划',
+                          ? '拆解成多条，落在待执行（Shift+Enter）'
+                          : '提交（Shift+Enter）',
+                      'aria-label': splitMode ? '拆解成待执行' : '提交计划',
                       onClick: append,
                     },
                     splitting ? h(SpinnerIcon, { size: 15 }) : h(SendIcon, { size: 15 }),
@@ -2447,7 +2557,7 @@
                   'span',
                   { className: 'plt-split-text' },
                   h('strong', null, '正在拆解…'),
-                  h('span', { className: 'plt-split-hint' }, draftMode ? '产物将落在草稿组' : '产物将落在待执行组'),
+                  h('span', { className: 'plt-split-hint' }, '产物将落在待执行组'),
                 ),
               ),
             )

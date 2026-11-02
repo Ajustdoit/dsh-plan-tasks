@@ -1,0 +1,2380 @@
+/* ============================================================
+ * DSH「任务列表」插件样式（@chengfa/dsh-plan-tasks）
+ * ============================================================
+ *
+ * 本文件由 build.mjs 从 src/styles/ 下的三个源文件生成，**不要手改**。
+ * 改样式请改 src/styles/*.css，然后运行「node build.mjs」。
+ *
+ * 加载方式（id=79-C 起）：
+ *   宿主以 /plan-tasks/styles.css 提供本文件（见 lib/host/styles.js），
+ *   并在 index.html 里注入 <link rel="stylesheet">。
+ *   运行时不再创建任何 style 节点。
+ *
+ * 层叠顺序（不可调换）：
+ *   01-base → 02-content → 03-theme。
+ *   03 的浅色规则大量依赖「同特异度、后写者胜」压过前两段的深色默认值，
+ *   顺序由文件名字典序固化，不要改成破坏字典序的名字。
+ *
+ * 类名前缀约定：
+ *   .plt-*        插件自有组件与布局类
+ *   --plt-*       CSS 自定义属性（只挂在 .plt-root 作用域内，不上 :root）
+ *   .is-* / .open / .running / .failed / .interrupted / .dragging
+ *                 .drop-target / .locked / .active / .done / .is-empty
+ *                 等状态修饰符 —— 一律叠加在 .plt-* 元素上使用，
+ *                 从不单独出现，因此不会命中宿主页面里同名元素。
+ */
+
+/* ────────────────────────────────────────────────────────────
+ * 基础与外壳（变量、面板、顶栏、遮罩、tooltip、输入区）
+ * 源文件：src/styles/01-base.css（112 条规则）
+ * ──────────────────────────────────────────────────────────── */
+/* ============================================================================
+ * DSH「任务列表」插件样式 · 第 1/3 段：基础与外壳
+ * ============================================================================
+ *
+ * 本文件是 id=79 迁移的**权威源**（source of truth）。
+ * 早先样式只以字符串形式活在 `src/client/20-css/*.js` 的 `CSS_PARTS` 里；
+ * 79 组把规则逐条搬到这里，让 CSS 以 CSS 的方式被编辑、检查、复用。
+ *
+ * ── 三段式为什么这么切 ────────────────────────────────────────────────────
+ * 拆成 3 个文件而不是 13 个（对齐原片段），也不是 1 个（96KB 单体）：
+ *   · 切太少：单文件接近百 KB，diff 噪音大、编辑器索引慢；
+ *   · 切太碎：13 个文件之间大量「同特异度、后写者胜」的覆盖关系会被打散，
+ *     改一个颜色要翻 4 个文件才能确认没被覆盖 —— 反而比现在更难维护。
+ * 边界按**层叠作用域**划，不按原片段划：
+ *   01-base.css    基础与外壳（变量、面板、顶栏、遮罩、输入区）
+ *   02-content.css 条目与分组（条目、分组、详情、子任务、批量区）
+ *   03-theme.css   主题覆盖（浅色），必须最后
+ *
+ * ── 顺序是语义，不是排版偏好 ──────────────────────────────────────────────
+ * 02 里的条目规则依赖 01 里定义的面板变量与容器；
+ * 03 的浅色规则**大量**依赖「同特异度、后写者胜」来压过 01/02 的深色默认值。
+ * 因此 `build.mjs` 按**文件名字典序**拼接，01 → 02 → 03 的顺序被文件名固化，
+ * 不靠人记。任何时候都不要给这三个文件改名成破坏字典序的名字。
+ *
+ * ── 加载通道 ──────────────────────────────────────────────────────────────
+ * 走 **build.mjs 现有打包链路**，不在入口处静态 `<link>`。原因：
+ *
+ *   1. 平台没有给插件暴露静态资源路由。`@deepseek-ai/dsh-client-modules` 的
+ *      `/plugins` 路由（bundleResource）只服务 client bundle 与 source map，
+ *      不提供包内任意文件 —— 插件拿不到自己 `assets/` 的 URL；
+ *   2. 客户端产物是单文件工厂函数（`window.__ModuleLoader__.load({...})`），
+ *      运行时没有可靠的「自身目录」，相对路径在打包后必错；
+ *   3. 官方 76 个客户端插件里 54 个都在运行时注入 `<style>`、0 个用 `<link>`，
+ *      这是平台惯例而非权宜。
+ *
+ * 具体链路（`build.mjs`）：
+ *   src/styles/*.css  ──读──▶  拼进 lib/client.js 的 CSS 常量  ──▶ apply() 注入 <style>
+ *                      └────▶  写出 assets/plan-tasks.css（可独立取用的第二形态）
+ *
+ * 也就是说：`assets/plan-tasks.css` 是**产物**，不要手改它；
+ * 要改样式改这里，然后跑 `node build.mjs`。
+ *
+ * ── 本步（79-B）只建骨架 ──────────────────────────────────────────────────
+ * 下面每个分区目前只有标题与说明，规则由 79-C 逐条搬入、79-D 单独处理动画、
+ * 79-E 做全量收尾。在此之前，原 `src/client/20-css/*.js` 仍是生效来源，
+ * 两处暂时并存 —— 这是**有意为之**：让搬运可以逐段进行、每段都能跑测试，
+ * 而不是一次性大爆炸式切换。
+ *
+ * ── 类名前缀约定（全局，三段通用）────────────────────────────────────────
+ *   .plt-*        插件自有组件与布局类
+ *   --plt-*       CSS 自定义属性，只挂在 .plt-root 作用域内，**不用 :root**
+ *   .is-* / .open / .running / .failed / .interrupted / .dragging / .drop-target
+ *   .locked / .active / .done / .is-empty / .is-hidden / .is-measuring
+ *                 状态修饰符 —— 一律叠加在 .plt-* 元素上，从不单独出现，
+ *                 因此不会命中宿主页面里的同名类。
+ * ========================================================================== */
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【1】主题变量
+ * 源：20-css/05-tooltip-vars.js（1 条规则）
+ * 挂在 .plt-root 上而不是 :root —— 作用域跟着面板走，不污染宿主其它区域，
+ * 也不跟官方主题的 inline token 打架。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+.plt-root{
+  --plt-tip-bg:rgba(34,42,56,.97);
+  --plt-tip-fg:#eef2f8;
+  --plt-tip-fg-muted:#c7d2e2;
+  --plt-tip-border:rgba(150,175,215,.30);
+  --plt-tip-shadow:0 2px 6px rgba(0,0,0,.38),0 12px 28px -8px rgba(0,0,0,.5);
+  --plt-tip-radius:8px;
+  --plt-tip-pad:7px 10px;
+  --plt-tip-font:12px;
+  --plt-tip-line:18px;
+  /* 最大宽度只是个上限：实际还要被「面板宽度 - 两侧留白」夹一次，
+     那一步放在组件规则里做（这里若写 cqw，落进 .plt-bar 这类嵌套容器会量错宽度）。 */
+  --plt-tip-max-w:320px;
+  /* 出现延迟：鼠标扫过一排按钮时不该一路弹气泡；淡入比淡出快一点，退场才不突兀。 */
+  --plt-tip-delay:320ms;
+  --plt-tip-fade:140ms;
+  /* 箭头是个旋转 45° 的正方形，边长与「气泡到目标元素」的间距分开给，
+     否则想在窄栏里把气泡贴紧一点，箭头会跟着一起缩没。 */
+  --plt-tip-arrow:5px;
+  --plt-tip-offset:8px;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【1.5】状态主题变量（id=78-A 起，历经 85-B / mBSaIn 两次改色）
+ *
+ * ── 颜色的三次变化（读到这里的人需要知道为什么是现在这个值）──────────────
+ *   1. id=406：待执行与执行中都是**绿色**（同一色系，靠明暗区分）；
+ *   2. id=78-A / 85-B：待执行改成**绿色**、执行中保持**红色**
+ *      （当时的需求是"运行中的那条要跳出来"）；
+ *   3. mBSaIn：用户反馈「红配绿不好看」，执行中由红改**黄色**。
+ *
+ * ── 为什么红配绿确实不好看（不只是主观）──────────────────────────────────
+ *   红与绿是互补色，等亮度并置时会产生**边缘振颤**（chromatic aberration 的观感），
+ *   看久了眼睛累。更要紧的是语义：两者都在喊"注意这里"，
+ *   放在同一组里等于两个都喊，反而都听不清。
+ *   黄色与绿同属暖侧、亮度接近，并置不刺眼；色相差异又够大，
+ *   一眼仍能分出"整组是绿的、这一条是黄的"。
+ *
+ * ── 为什么深色与浅色要用不同的值 ─────────────────────────────────────────
+ * 同一支色在两套底色上不可能都达标（这是 id=78-A 时就定下的原则）：
+ *   · 深底（rgb 22,24,28）上，暗色全糊 —— 深红 #991b1b 只有 2.14:1，
+ *     深黄 #a16207 更低；所以深色侧要用**亮**的一档；
+ *   · 白底上，亮色又太浅 —— #ffd60a 只有 1.3:1，几乎看不见；
+ *     所以浅色侧要用**深**的一档。
+ * 实测对比度见下面各段注释。
+ *
+ * ── 两级的层级差异 ──────────────────────────────────────────────────────
+ * 待执行 = 「还没开工」→ 绿；
+ * 执行中 = 「正在跑」   → 黄（深色侧比绿亮一档，浅色侧用更深的黄保证可读）。
+ * 层级靠"亮/暗 + 色相"两重区分，不靠饱和度堆叠。
+ */
+ *
+ * ── 命名 ─────────────────────────────────────────────────────────────────
+ * 按**语义**命名（todo / run + bg/fg/line/hover/on），不按「red-1/red-2」：
+ * 以后换色只改变量值，所有引用点一个字都不用动。
+ *
+ * 值格式说明：主色/描边给的是 **RGB 三元组**（不带 rgb() 外壳），
+ * 这样调用方可以自由套透明度：rgba(var(--plt-todo,46,160,67),.16)。
+ * 与既有的 --plt-accent 完全同一套用法，替换时不用改调用语法。
+ * ────────────────────────────────────────────────────────────────────────── */
+.plt-root{
+  /* —— 待执行：深色（默认主题）· id=85-B 由红改绿 ——
+   *
+   * 为什么只改这 6 个值就够：待执行组的所有颜色（组标题、徽标、卡片边框、
+   * 左侧色条、文字强调色、数量角标、开始按钮）都引用这一套变量 ——
+   * 这正是当初「按语义命名而不按 red-1/red-2」的用途（见上方命名说明）。
+   *
+   * 绿色取值与原来红的**观感重量相当**：
+   *   #f05252 → 5.11:1，换成 #2ea043 → 5.27:1。
+   *   没有挑更亮的绿（如 #4ade80 的 10.2:1）—— 那会在深底上过于跳，
+   *   与旁边已审核组的灰、待审核组的琥珀不在一个重量级上。
+   *
+   * 执行中（--plt-run）**改为黄色**（用户反馈「红配绿不好看」）。
+   *
+   * 85-B 把待执行改绿之后，执行中的红就成了同一组里的对比色 —— 红绿并置本身
+   * 刺眼，而且两者都在强调"这是活的"这件事，反而互相削弱。
+   * 现在用黄色：与绿同属暖侧、亮度接近，并置不刺眼，但色相差异够大，
+   * 一眼仍能分出"整组是绿的、这一条是黄的"。
+   *
+   * 取值 #ffd60a：深底上 12.59:1（原红 5.87:1），明显更亮 ——
+   * 执行中是这一屏**唯一**需要被立刻找到的那条，亮一档是合理的层级。
+   * 与待执行绿（46,160,67）的亮度比 2.39:1，色相又分属黄/绿，区分度足够。
+   */
+  --plt-todo:46,160,67;          /* #2ea043 · 主色，深底上 5.27:1 */
+  --plt-todo-fg:187,247,208;     /* #bbf7d0 · 主色文字在深底上更亮，用于标题/计数 */
+  --plt-todo-line:46,160,67;     /* 边框/描边（调用处再套透明度） */
+  --plt-todo-bg:46,160,67;       /* 浅底色（调用处套 .045~.16 的低透明度） */
+  --plt-todo-hover:74,222,128;   /* #4ade80 · 悬停：提亮一档 */
+  --plt-todo-on:63,185,80;       /* #3fb950 · 选中/激活：更实 */
+
+  /* —— 执行中：深色（黄色）—— */
+  --plt-run:255,214,10;          /* #ffd60a · 深底上 12.59:1 */
+  --plt-run-fg:255,233,138;      /* #ffe98a · 文字，深底上 14.62:1 */
+  --plt-run-line:255,214,10;
+  --plt-run-bg:255,214,10;
+
+  /* —— 强调色（id=IlSb8Z）——
+   *
+   * `--plt-accent` 原来**只**定义在分组选择器上（02-content.css:168-172），
+   * `.plt-root` 自己没有。而分组之外的规则（按钮、气泡、顶栏）也大量引用它，
+   * 全靠"这些元素恰好都在某个分组里"这条隐含前提才成立。
+   *
+   * 一旦某个元素不在组内（新加控件、气泡被挂到外面、DevTools 里把节点拖出子树），
+   * `var(--plt-accent,140,140,140)` 就解析为空 —— 这正是 DevTools Issues 里
+   * 「--plt-accent / --plt-todo is not defined」那一类告警的来源，
+   * 表现是颜色失效、回落成白/透明。
+   *
+   * 在根上给一份中性默认值：不在组内的元素拿到灰色（不再是"未定义"），
+   * 在组内的元素仍被各分组自己的取值覆盖，行为不变。
+   * 默认取 140,140,140 —— 与 `.plt-group` 基础值一致，组外元素本该是中性色。 */
+  --plt-accent:140,140,140;}
+
+/* ── 输入卡片基色（id=2-C）──────────────────────────────────────────────────
+ *
+ * `--plt-composer-bg` 原先**只在消费处写了 fallback**：
+ *   .plt-composer{ background: …, var(--plt-composer-bg,#0d1830) }
+ * 全仓（src/ assets/ lib/）搜不到任何一处定义 —— 它能工作纯粹靠那个 #0d1830。
+ *
+ * 为什么现在补上而不是继续靠 fallback：
+ *   ① fallback 只覆盖"变量未定义"这一种情况，**改不了主题**；
+ *      将来若想让卡片底色跟着主题走，没有变量可调。
+ *   ② 变量审计要求「被引用的变量都有定义」，它一直是清单里唯一的例外。
+ *
+ * 放在这里（`.plt-root`）而不是 `.plt-composer` 自己的规则里：
+ *   与其它 --plt-* 主题变量同一处，改色时不用翻两个文件；
+ *   且 `.plt-composer` 是 `.plt-root` 的后代，能正常继承。
+ *
+ * 取值来源：原先硬编码在 fallback 里的 #0d1830（深蓝黑）。
+ * 它不是随手挑的 —— 卡片上面还要叠三层蓝渐变
+ *（径向蓝光 + 135° 蓝紫 + 顶部高光），基底必须够深才压得住，
+ * 否则叠出来会发灰。数值原样搬过来，不趁机改色。
+ *
+ * 只在这里定义深色值：浅色档的 .plt-composer 用**字面量**
+ * （#ffffff → #fdfdfe 渐变，见 03-theme.css:135），
+ * 根本不消费这个变量，所以浅色块里不需要同名定义。 */
+.plt-root{
+  --plt-composer-bg:#0d1830;   /* 深蓝黑 · 输入卡片基底，上面叠三层蓝渐变 */
+}
+
+/* 浅色主题：绿必须压深，白底才够对比（7.13:1）。 */
+body:not([data-ds-dark-theme]) .plt-root{
+  /* id=85-B：待执行由红改绿（浅色档）。
+     红原本是 #b91c1c（6.47:1），绿取 #166534（7.13:1）—— 略高一点，
+     因为绿在白底上的可读性天然不如红，压深一档才不至于"发灰"。
+     -fg 用更深的 #14532d：它压在浅绿底（.10 透明度）上，需要比主色更深才读得清。 */
+  --plt-todo:22,101,52;          /* #166534 · 白底上 7.13:1 */
+  --plt-todo-fg:20,83,45;        /* #14532d · 更深，压在浅绿底上仍可读 */
+  --plt-todo-line:22,101,52;
+  --plt-todo-bg:22,101,52;
+  --plt-todo-hover:21,128,61;    /* #15803d · 悬停提亮一档（5.02:1） */
+  --plt-todo-on:21,128,61;
+
+  /* —— 执行中：浅色（黄色）—— */
+  /* 白底上不能直接用 #ffd60a（对比度只有 1.3:1，几乎看不见）。
+     压成 #a16207（yellow-700）：白底 4.92:1 达标，色相仍是明确的黄。
+     没有选更深的 #854d0e / #92400e —— 那两者在白底上会读成"棕色"，
+     与"等待中"的语义距离反而变远；4.92:1 虽不富余，但执行中的文字有
+     font-weight:600 加粗辅助，且它不是需要长时间阅读的内容（只有编号行）。 */
+  --plt-run:161,98,7;            /* #a16207 · 白底上 4.92:1 */
+  --plt-run-fg:133,77,14;        /* #854d0e · 文字用更深一档，白底 6.85:1 */
+  --plt-run-line:161,98,7;
+  --plt-run-bg:161,98,7;
+
+  /* —— 强调色（id=IlSb8Z，浅色档）——
+     与深色档同理：组外元素也要有定义，否则 var(--plt-accent,140,140,140) 解析为空。
+     取 140,140,140 与 `.plt-group{--plt-accent:140,140,140}` 一致 ——
+     那条基础规则在深浅两套主题下都生效，这里是它的同源副本。 */
+  --plt-accent:140,140,140;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【2】面板根与顶栏
+ * 源：20-css/10-topbar.js（26 条规则）
+ * 面板容器（含 container-type:size，让输入框按面板实际高度伸缩）、标题、
+ * 开始/暂停按钮、内联 SVG 图标基类、剪贴板兜底用的离屏节点。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* container-type:size（id=152）：让输入框的高度能按「面板实际高度」伸缩（cqh），
+   而不是按窗口高度（vh）。侧栏被拖矮时 vh 察觉不到，会把列表挤成负数高度；
+   用 cqh 后输入框自己先收，列表始终留得下。
+   position:relative（id=171）：container-type 只建立 cqh 容器，**不建立 absolute 的包含块**。
+   没有它，面板里 position:absolute;inset:0 的两块遮罩会锚到浏览器视口（ICB）而不是面板自己 ——
+   实测面板 460×700 时遮罩撑成 512×602，于是「在遮罩里居中」= 在错误的盒子里居中。 */
+.plt-root{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;container-type:size;font-size:14px;color:var(--dsw-alias-label-primary,#e6e6e6)}
+.plt-top{flex:0 0 auto;display:flex;flex-wrap:nowrap;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--dsw-alias-border-secondary,rgba(255,255,255,.08))}
+.plt-title{font-weight:600;font-size:19px;letter-spacing:.01em;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plt-btn{cursor:pointer;border:1px solid var(--dsw-alias-border-secondary,rgba(255,255,255,.14));background:transparent;color:inherit;border-radius:6px;padding:3px 9px;font-size:14px;line-height:20px;white-space:nowrap}
+.plt-btn:hover:not(:disabled){background:var(--dsw-alias-bg-hover,rgba(255,255,255,.06))}
+.plt-btn:disabled{opacity:.5;cursor:default}
+.plt-btn.primary{background:var(--dsw-alias-bg-accent,#2f6fd0);border-color:transparent;color:#fff}
+.plt-auto{display:inline-flex;align-items:center;gap:6px;min-width:62px;justify-content:center;font-variant-numeric:tabular-nums}
+.plt-auto .plt-dot{width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-label-caption,#8a8a8a);flex:0 0 auto}
+.plt-auto.on{color:var(--dsw-alias-label-accent,#7fb0ff);border-color:rgba(80,140,255,.45)}
+.plt-auto.on .plt-dot{background:#4caf50;box-shadow:0 0 0 2px rgba(76,175,80,.18)}
+/* 顶栏很窄时把开始/暂停按钮收一档（id=k7xFdQ 重算）。
+ *
+ * 历史：这段是 id=88-B 为「38px 高 + 三颗控件」的溢出加的补丁。
+ * 之后顶栏的「自动确认」被删除（id=wZIKdd），本按钮也收回 28px（本次），
+ * 重新算空间：固定控件 自动刷新 62 + 本按钮 108 = 170，加 3×8 gap 与 24 padding
+ * 合计 218px —— 280px 侧栏下仍剩 62px，**不再有溢出风险**。
+ *
+ * 所以这一档从「防止溢出」降级为「窄屏更紧凑」的观感微调：
+ * 只收最小宽度与横向内边距，**不再动纵向 padding**（动了就不是等高 28px 了，
+ * 而"与倒计时等高"正是本次的需求）。 */
+@container (max-width:360px){
+  /* id=8sg3iA：主规则已经降到 76px，这一档若还留着 92px 就**比主规则更宽**了
+     —— 窄屏反而变宽，逻辑颠倒。同步下调到 68px。 */
+  .plt-start,.plt-pause{min-width:68px;padding:3px 9px;gap:5px}
+}
+/* 更窄（≤300px）时连文字一起收掉，只留图标。
+   纵向 padding 仍保持 3px，配合 line-height 20px 撑出同样的 28px，
+   点击区不会因为收起文案而变矮。 */
+@container (max-width:300px){
+  .plt-start,.plt-pause{min-width:0;padding:3px 9px}
+  .plt-start-sub,.plt-pause-sub{display:none}
+}
+/* 开始 / 暂停（id=207）：顶栏里的图标按钮。
+   inline-flex + gap 让图标与文字垂直居中并保持固定间距；flex:0 0 auto
+   保证顶栏被压窄时这个按钮不参与收缩，压缩全部由 .plt-title 承担。
+   id=354：两组类名保留，但同一时刻只会挂上其中一个（由 agentRunning 决定），
+   所以下面那套「互斥」的配色实际上永远作用于屏幕上唯一的那颗按钮。
+   min-width + 居中（id=354）：这颗按钮的文案会在 开始 / 继续 / 发送中… / 暂停 / 暂停中
+   之间换，字数不同。给一个按最长文案（「发送中…」）量的固定宽度，
+   换文案时按钮不伸缩，右侧的倒计时也不会跟着左右跳。 */
+/* 开始 / 暂停（id=207 渲染；id=88-B 曾加大到 38px；id=k7xFdQ 收回与倒计时一致）
+ *
+ * ── 尺寸（与相邻的「倒计时」按钮完全对齐）────────────────────────────────
+ *   高度      38px → **28px**（padding 7→3 纵向 + line-height 22→20 + 边框 2）
+ *   字号      15px → **14px**
+ *   内边距    7px 14px → **3px 14px**（横向保持 14 —— 文案比「自动刷新」长）
+ *   图标      15px（保持，由渲染处传 size，见 60-tab.js）
+ *   最小宽度  108px（保持 —— 「发送中…」比「自动刷新」宽）
+ *
+ * 为什么回到 28px：倒计时（`.plt-auto`）走的是 `.plt-btn` 基础尺寸
+ * （padding 3px 9px + line-height 20px + 边框 2 = 28px），两者在同一行并排，
+ * 一个 38px 一个 28px 会让顶栏看起来参差 —— 用户要求「高度一致」。
+ *
+ * 与 88-B 的关系（如实记录）：88-B 当时把高度从 28 加到 38，理由是「点击区偏小」。
+ * 现在收回 28 是**用户对观感的取舍**：一行里两颗控件等高优先于单颗更大的点击区。
+ * 若将来又嫌点击区小，正确做法是**两颗一起加高**（同时改 .plt-btn），
+ * 而不是只加这一颗 —— 那正是这次要修的问题。
+ *
+ * 横向 padding 保留 14（不是倒计时那 9）：本按钮文案最长是「发送中…」四字，
+ * 横向留白不足会显得挤；它与倒计时不等宽是**刻意的**，用户要的是等高。
+ *
+ * 不写死 height：用 padding + line-height 自然撑出 28px，
+ * 这样宿主主题放大字号时按钮会跟着长，而不是把文字截断。
+ *
+ * ── 对齐 ─────────────────────────────────────────────────────────────────
+ *   flex:0 0 auto —— 顶栏被压窄时不参与收缩（压缩全交给 .plt-title），
+ *   否则按钮会先被挤扁，点击区反而变小。
+ *   与「倒计时」同为 28px，「自动刷新」圆点开关在它左侧，
+ *   由顶栏的 align-items:center 统一对齐，不需要额外 margin。
+ *
+ * 字号 14px 与倒计时按钮一致，与标题（14px）同级 ——
+ * 同一行的控件字号统一，视觉上才是一排而不是一堆。 */
+/* id=6Gs9v1-B：**「完成后暂停」开关也进这条共享规则**。
+ *
+ * 三者（开始 / 暂停 / 完成后暂停）在顶栏并排，尺寸必须同一份来源：
+ * gap / flex / min-width / padding / font-size / line-height / font-weight。
+ * 之前开关自己写了一整套（18px 高的小胶囊），搬到顶栏后只能靠补偿规则去追，
+ * 两边永远在对齐与走散之间反复。
+ *
+ * 现在把它并进来之后，**改这一条三个按钮一起变**，不会再出现一个高一个矮。
+ * 它自己的配色（常态灰 / 开态黄 / hover / disabled）仍然由
+ * 02-content.css 的 .plt-auto-pause 系列决定，互不干扰。 */
+/* id=8sg3iA：**暂停按钮短一点**。
+ *
+ * 原来 min-width:108px + padding:3px 14px。而按钮的实际内容只有
+ *「图标 15 + gap 6 + 两个汉字 ≈ 28」≈ 49px，加 padding 后自然宽约 79px ——
+ * min-width 又把它撑到 108px，**白多出 29px 空白**，两个字的按钮看着像四个字宽。
+ *
+ * 改：min-width 108 → 76，padding 14 → 10。
+ *   自然宽降到约 71px，76 兜得住，所以「开始 ↔ 暂停」互切时宽度仍然不跳
+ *   —— min-width 原本就是为了这件事故意设的，不能直接删掉（删了字体一换宽度就变）。
+ *   「停后 / 继续」内容更窄（约 64px），同一条 min-width 兜着，三个按钮一样宽。
+ *
+ * 净效果：每个按钮窄约 32px，顶栏一行省下近 100px。 */
+.plt-start,.plt-pause,.plt-auto-pause{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:0 0 auto;min-width:76px;padding:3px 10px;font-size:14px;line-height:20px;font-weight:500}
+/* 开始按钮是这一行里的唯一的主动作，给一点绿色倾向（不是实心，仍然克制），
+   让它在中性的「自动刷新」按钮旁边能被一眼找到。 */
+/* id=85-B：开始按钮的绿改用 --plt-todo 变量，不再硬编码 rgba(34,150,84)。
+ *
+ * 它原本就是绿的，但那个绿（34,150,84）与待执行组的主色（现在 46,160,67）
+ * 不是一个值 —— 题面要的「全部使用同一套绿色变量，避免部分绿部分红」，
+ * 也包括这种"两个绿各走各的"的隐性混搭。
+ *
+ * 注意：这个按钮在顶栏 .plt-top 里，**不在** .plt-group-todo 内，
+ * 所以拿不到那层 --plt-accent 重定向，必须直接引 --plt-todo。
+ * --plt-todo 定义在 .plt-root 上，顶栏是它的后代，能正常继承。 */
+.plt-start:not(:disabled){color:var(--dsw-alias-label-primary,#e6e6e6)}
+.plt-start:not(:disabled):hover{background:rgba(var(--plt-todo,46,160,67),.14);border-color:rgba(var(--plt-todo,46,160,67),.45)}
+/* 暂停是反向动作，hover 透出暖橙，与开始分得开又不至于像报错。
+   id=88-B：改用 --plt-run 变量（原为硬编码 216,120,32）。
+   理由与 85-B 修开始按钮同源：硬编码色不跟主题走，换主题会露馅。 */
+.plt-pause:not(:disabled):hover{background:rgba(var(--plt-run,255,214,10),.14);border-color:rgba(var(--plt-run,255,214,10),.5)}
+/* —— 四个状态的视觉（id=210）——
+   未开始 / 执行中 / 已暂停 / 异常，各自由既有的推导变量挂类，不新增状态：
+   · .plt-start.is-resume —— 已挂起，这个按钮现在是「继续」，用蓝调与「开始」的绿区分；
+   · .plt-pause:not(:disabled) —— 执行中它才是可点的，给琥珀描边说明「现在能停」；
+   · :disabled —— 统一压到 .42（.plt-btn 的 .5 在这两个带色按钮上仍然偏亮）；
+   · .plt-top.has-error —— 上次操作失败时描红，和顶部的错误提示对上。
+   id=354 起屏幕上只有一颗按钮，这些规则按「它此刻是谁」生效，不再需要两颗对齐。 */
+.plt-start.is-resume:not(:disabled){color:rgba(120,162,255,.98);border-color:rgba(80,140,255,.46);background:rgba(65,118,230,.12)}
+.plt-start.is-resume:not(:disabled):hover{background:rgba(65,118,230,.20);border-color:rgba(80,140,255,.62)}
+.plt-pause:not(:disabled){color:rgba(255,190,90,.96);border-color:rgba(255,180,60,.42)}
+.plt-start:disabled,.plt-pause:disabled{opacity:.42}
+/* id=88-B：禁用时把 hover 的暖橙/绿压掉 ——
+   否则禁用时鼠标划过仍会亮起，看起来像「能点但没反应」。
+   尺寸变大后误触变多，这条比之前更重要。 */
+.plt-start:disabled:hover,.plt-pause:disabled:hover{background:transparent;border-color:var(--dsw-alias-border-secondary,rgba(255,255,255,.14))}
+/* id=88-B：focus-visible —— 键盘聚焦时给一圈完整可见的轮廓。
+   按钮变大后更容易成为 Tab 落点，没有这圈提示会不知道焦点在哪。
+   用 outline 而非 box-shadow：后者会被 6px 圆角裁掉两侧。 */
+.plt-start:focus-visible,.plt-pause:focus-visible{outline:2px solid var(--dsw-alias-border-accent,rgba(80,140,255,.75));outline-offset:2px}
+/* 执行中把「暂停」的图标压暗一点点，让文字比图标更先被读到；
+   文字保持可读，禁用时不受影响（:not(:disabled) 已经排除）。 */
+.plt-pause:not(:disabled) svg{opacity:.92}
+.plt-top.has-error .plt-start,.plt-top.has-error .plt-pause{border-color:rgba(214,68,68,.52)}
+.plt-top.has-error .plt-start.is-resume:not(:disabled){border-color:rgba(214,68,68,.62)}
+/* id=71-D：内联 SVG 图标的公共形态。
+   这些规则原先写成每个图标组件里的 style 对象字面量
+   （14 处重复）—— 现在统一由类承担，组件只写 className。
+
+   三个类的分工：
+   1. .plt-ico —— 所有插件图标的基础：块级、不继承基线对齐导致的 1px 缝隙；
+   2. .plt-ico-fixed —— 追加 flex:0 0 auto：与文字并排时不被压缩
+      （图标是定宽方块，被压扁比换行更难看）；
+   3. .plt-ico-brand —— 只有 PlanIcon 用：品牌蓝。取 static 层 token，
+      主题包不会改写它（alias 层的 brand 在某些主题下会变成近白色）。 */
+.plt-ico{display:block}
+.plt-ico-fixed{flex:0 0 auto}
+.plt-ico-brand{color:var(--dsw-static-deepseek-500,#4176e6)}
+/* 剪贴板兜底用的临时 textarea（30-runtime.js 的 copyText 在 navigator.clipboard
+   不可用时走这条路）：移出视口、不可见，但仍然能被 select() 选中。
+   top 用 -1000px 而不是 display:none —— 后者会让节点无法 select()。
+   类定义在这里而不是内联，是因为它是纯固定值、与运行时计算无关。 */
+.plt-offscreen{position:fixed;top:-1000px;left:0;opacity:0;pointer-events:none}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【3】遮罩与顶部行内提示
+ * 源：20-css/11-overlay.js（21 条规则｜2 个 @keyframes｜4 条 animation）
+ * 拆解中贴边提示卡、提交/审核结果提示。
+ * ⚠ 动画：keyframes 名 plt-split-fade、plt-split-in（79-D 专项处理）
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* 拆解遮罩：点发送立刻盖上，右侧贴边一张提示卡。
+   pointer-events:none 是刻意的 —— 遮罩只做视觉提示，不接管点击，
+   底下（以及侧边栏其它）按钮仍然可以正常点，不会出现「点不动了」。 */
+.plt-split-mask{position:absolute;inset:0;z-index:18;background:rgba(6,14,26,.42);pointer-events:none;animation:plt-split-fade .16s ease both}
+/* 卡片层级永远高于遮罩（它是遮罩的子节点，天然在上）。
+   id=171：从「贴右边缘探出来」改成面板正中 —— left:50% + translate(-50%,-50%)，
+   圆角/边框/阴影都恢复四边对称（贴边时代的 border-right:none、单侧投影都是为贴合用的）。 */
+.plt-split-card{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  display:flex;align-items:center;gap:12px;
+  /* id=213：原来是纯内容撑开（实测恒为 164×64.3，跟面板宽高一点关系都没有），
+     看着像个小气泡，用户反馈「有点小」。这里按面板宽度给个显式宽度（76% → 封顶 240px），
+     纵向 padding 一并加厚，让卡片整体放大 ~1.45 倍而**宽高比基本不变**（原 2.55:1）。
+     id=214：补上下限。四条全挂在面板尺寸上（cqw/cqh 以 .plt-root 为容器，见 10-topbar.js:13），
+     不写死像素：
+       · min-width 是硬下限（150px），保证极窄侧栏下不塌成一条；
+         但它自身再被 92cqw 夹一次，所以「抬高下限」永远不会导致横向溢出。
+       · max-width 是兜底封顶，比 width 宽一档，正常永远不生效 —— 只有将来 width 被改小/内容
+         撑破时才会接管，避免横向跑出面板。
+       · min-height / max-height 夹住纵向：矮面板下不让卡片高过面板（否则内容被面板裁掉），
+         此时卡片内部自己滚动（overflow:auto），比静默裁切可读。
+     width/max-width 这里刻意用 cqw 而不是百分比 —— 百分比算的是包含块（遮罩），
+     与 min() 混用推不直观；cqw 就是面板宽度的 1%，一眼可算。 */
+  width:min(76cqw,240px);
+  min-width:min(150px,92cqw);
+  max-width:min(92cqw,300px);
+  min-height:min(64px,28cqh);
+  max-height:min(78cqh,240px);
+  overflow:auto;
+  box-sizing:border-box;
+  /* id=215：内边距从 22/20 改成 20/22 —— 横向略大于纵向是卡片的常规比例，
+     原来的「纵向比横向还厚」让两行字看着被上下夹扁。 */
+  padding:20px 22px;
+  /* 圆角对齐输入区那张「悬浮卡片」（.plt-composer 的 14px），不再自成一套 12px。 */
+  border-radius:14px;
+  border:1px solid rgba(124,162,232,.22);
+  /* 底色跟着输入区那套走：上亮下暗的极淡渐变（模拟顶部受光），不再是一块纯色。 */
+  background:linear-gradient(180deg,rgba(28,36,50,.97),rgba(20,27,38,.97));
+  /* 阴影分三层，和输入区卡片同一套「贴地影 + 中距扩散 + 远距弥散」再加一道顶部内高光：
+     单层大投影会让卡片看着像贴在纸上，分层才有厚度。 */
+  box-shadow:0 2px 4px rgba(3,9,22,.34),0 12px 26px -10px rgba(4,12,30,.6),0 32px 60px -26px rgba(8,20,48,.66),inset 0 1px 0 rgba(158,190,246,.14);
+  color:#f2f4f7;font-size:15px;line-height:1.6;
+  pointer-events:auto;
+  animation:plt-split-in .22s cubic-bezier(.22,.9,.28,1) both;
+}
+/* 转圈给一点蓝：它原来跟正文同色（近白），在放大后的卡片里显得发灰、不像「正在进行」。
+   取值与插件主色同一支（深色下偏亮的蓝，浅色下用深一档的蓝）。 */
+.plt-split-card svg{color:#8ab0f5;flex:0 0 auto}
+.plt-split-card .plt-split-text{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1 1 auto}
+.plt-split-card .plt-split-text strong{font-weight:600;letter-spacing:.1px}
+.plt-split-card .plt-split-hint{color:rgba(232,238,247,.68);font-size:13px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@keyframes plt-split-fade{from{opacity:0}to{opacity:1}}
+/* 进场关键帧必须与基础样式的 transform 用同一套居中值：
+   animation 的 fill-mode 是 both，动画跑完后保留的是**关键帧里的 to**，不是基础样式 ——
+   若 to 还写着旧的 translate(0,-50%)，卡片会永久偏右半个身位（实测 dx=+56px）。
+   方向也换了：贴边时代是从左往右滑进面板；居中后改成从中心上方 14px 落位，不再横向漂移。 */
+@keyframes plt-split-in{from{opacity:0;transform:translate(-50%,calc(-50% - 14px))}to{opacity:1;transform:translate(-50%,-50%)}}
+@media (prefers-reduced-motion: reduce){
+  .plt-split-mask{animation:none}
+  .plt-split-card{animation:none}
+}
+/* 顶部行内提示：提交 / 审核 / 拖拽保存的结果，显示在自动刷新按钮左侧。 */
+.plt-notice{flex:0 1 auto;min-width:0;max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;line-height:18px;padding:0 7px;border-radius:999px;background:rgba(76,175,80,.13);border:1px solid rgba(76,175,80,.32);color:#6fc47a}
+/* 输入区做成「悬浮卡片」：整块从列表里抬起来。
+   立体感由四层叠出来 ——
+   1) 渐变底：上亮下暗，模拟顶部受光；
+   2) 内斜面：顶部 1px 白高光 + 底部 1px 暗边，形成厚度；
+   3) 两层外投影：近距离贴地影 + 远距离扩散影；
+   4) 卡片下方一道模糊的接触阴影（.plt-form-wrap::after），让它「离地」。 */
+/* 输入区现在贴在面板底部（列表在上、输入在下）：上留白给列表一点呼吸，
+   下留白让卡片离底边有距离，接触阴影落在卡片正下方。 */
+/* 输入区保持在本层：拆解遮罩是 pointer-events:none，不会拦点击，
+   而遮罩里的提示卡片（z-index 18）仍然盖在输入区之上，读起来是「浮在最上层」的那一层。 */
+.plt-form-wrap{position:relative;z-index:2;flex:0 0 auto;padding:8px 12px 11px 12px}
+/* 卡片正下方的接触阴影：横向收窄的椭圆模糊，投影越实、悬浮感越强。带一点蓝，和卡片同色系。 */
+.plt-form-wrap::after{content:'';position:absolute;left:26px;right:26px;bottom:2px;height:14px;border-radius:50%;background:rgba(6,14,32,.52);filter:blur(10px);z-index:0;pointer-events:none}
+/* 偏蓝的深色 + 蓝色渐变：底色走带蓝相的海军墨蓝，
+   上面叠一层从左上到右下的蓝色渐变（蓝 → 微紫 → 深蓝收尾），
+   再加第二层顶部高光，整体「沉一点的蓝」而不是发灰的黑。 */
+.plt-composer{position:relative;z-index:1;display:flex;flex-direction:column;gap:7px;background:
+  radial-gradient(120% 140% at 8% 0%,rgba(96,152,255,.22),rgba(96,152,255,0) 58%),
+  linear-gradient(135deg,rgba(64,116,224,.20) 0%,rgba(92,120,232,.10) 46%,rgba(10,26,58,.30) 100%),
+  linear-gradient(180deg,rgba(92,142,232,.10),rgba(92,142,232,0) 46%,rgba(2,8,20,.34)),
+  var(--plt-composer-bg,#0d1830);border:1px solid rgba(96,146,236,.24);border-radius:14px;padding:10px 10px 9px;box-shadow:0 2px 3px rgba(3,9,22,.26),0 10px 22px -8px rgba(4,12,30,.62),0 26px 50px -22px rgba(8,20,48,.66),0 0 0 1px rgba(96,146,236,.05),inset 0 1px 0 rgba(140,180,255,.14),inset 0 -1px 0 rgba(2,8,20,.55),inset 0 0 0 1px rgba(120,166,246,.02);transition:border-color .16s ease,box-shadow .18s ease,transform .18s ease}
+.plt-composer:hover{transform:translateY(-1px);border-color:rgba(112,164,250,.38);box-shadow:0 2px 3px rgba(3,9,22,.28),0 14px 28px -8px rgba(6,16,38,.64),0 34px 58px -24px rgba(10,26,60,.68),0 0 22px -6px rgba(76,132,224,.22),inset 0 1px 0 rgba(150,190,255,.18),inset 0 -1px 0 rgba(2,8,20,.56)}
+.plt-composer:focus-within{transform:translateY(-2px);border-color:var(--dsw-alias-border-accent,rgba(96,152,255,.72));box-shadow:0 0 0 3px rgba(80,140,255,.16),0 2px 3px rgba(3,9,22,.2),0 18px 34px -8px rgba(6,18,44,.56),0 40px 70px -26px rgba(10,28,66,.64),0 0 30px -6px rgba(86,144,238,.3),inset 0 1px 0 rgba(168,202,255,.26),inset 0 -1px 0 rgba(2,8,20,.46)}
+/* 聚焦时卡片顶部落一道淡蓝渐隐，强化「被拿起来」的感觉。 */
+.plt-composer::before{content:'';position:absolute;inset:0;z-index:0;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .2s ease;background:linear-gradient(180deg,rgba(96,152,255,.20),transparent 52%)}
+.plt-composer:focus-within::before{opacity:1}
+/* 文字层与操作层压在渐隐之上，避免那层极淡的蓝把正文染灰。 */
+.plt-composer .plt-input,.plt-composer .plt-bar{position:relative;z-index:1}
+@media (prefers-reduced-motion: reduce){.plt-composer{transition:border-color .16s ease,box-shadow .18s ease}.plt-composer:hover,.plt-composer:focus-within{transform:none}}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【4】悬浮提示（tooltip）
+ * 源：20-css/06-tooltip.js（22 条规则）
+ * 气泡本体、四方向箭头、两个状态类（.is-hidden 未测量/隐藏、.is-measuring 测量中）。
+ * 位置与最大尺寸由 JS 按实时测量结果内联写入，**不在本文件里**。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+.plt-tip{position:fixed;z-index:60;box-sizing:border-box;max-width:var(--plt-tip-max-w,320px);padding:var(--plt-tip-pad,7px 10px);border:1px solid var(--plt-tip-border,rgba(150,175,215,.30));border-radius:var(--plt-tip-radius,8px);background:var(--plt-tip-bg,rgba(34,42,56,.97));color:var(--plt-tip-fg,#eef2f8);box-shadow:var(--plt-tip-shadow,0 2px 6px rgba(0,0,0,.38),0 12px 28px -8px rgba(0,0,0,.5));font-size:var(--plt-tip-font,12px);line-height:var(--plt-tip-line,18px);font-weight:400;font-style:normal;letter-spacing:.01em;text-align:left;white-space:pre-line;overflow-wrap:anywhere;word-break:break-word;pointer-events:none;opacity:0;transition:opacity var(--plt-tip-fade,140ms) ease,transform var(--plt-tip-fade,140ms) ease}
+/* 出现时只把不透明度与位移收回来，不留 display 切换 —— 那会让淡出根本没时间播。 */
+.plt-tip.is-on{opacity:1;transform:none}
+/* id=71-D：两个状态类，替代原先散在 40-tip.js 里的 el.style.* 赋值。
+   .is-hidden    —— 还没测量完 / 已隐藏。用 visibility 而不是 display:none：
+                    节点必须保持在布局里（要量 offsetWidth/height 才能算放置位置），
+                    display:none 量出来全是 0，气泡会定位到左上角。
+   .is-measuring —— 仅在「量包含块原点」的那一瞬加上：把方向类带来的 3px 位移抵消掉，
+                    否则同一颗气泡换到相反方向时那 3px 会翻倍成 6px 偏差。
+   两者的值都是固定常量，与运行时计算无关，所以收进样式表。 */
+.plt-tip.is-hidden{visibility:hidden}
+.plt-tip.is-measuring{transform:none}
+/* 箭头基底：0 尺寸 + border 拼三角，颜色按方向各给一条。 */
+.plt-tip::before,.plt-tip::after{content:'';position:absolute;width:0;height:0;border-style:solid;border-color:transparent;pointer-events:none}
+.plt-tip::before{border-width:calc(var(--plt-tip-arrow,5px) + 1px)}
+.plt-tip::after{border-width:var(--plt-tip-arrow,5px)}
+/* —— 上：气泡在目标之上，箭头朝下 —— */
+.plt-tip--top{transform:translateY(3px)}
+.plt-tip--top::before{left:50%;bottom:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));margin-left:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));border-top-color:var(--plt-tip-border,rgba(150,175,215,.30))}
+.plt-tip--top::after{left:50%;bottom:calc(-1 * var(--plt-tip-arrow,5px));margin-left:calc(-1 * var(--plt-tip-arrow,5px));border-top-color:var(--plt-tip-bg,rgba(34,42,56,.97))}
+/* —— 下：箭头朝上 —— */
+.plt-tip--bottom{transform:translateY(-3px)}
+.plt-tip--bottom::before{left:50%;top:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));margin-left:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));border-bottom-color:var(--plt-tip-border,rgba(150,175,215,.30))}
+.plt-tip--bottom::after{left:50%;top:calc(-1 * var(--plt-tip-arrow,5px));margin-left:calc(-1 * var(--plt-tip-arrow,5px));border-bottom-color:var(--plt-tip-bg,rgba(34,42,56,.97))}
+/* —— 左：箭头朝右 —— */
+.plt-tip--left{transform:translateX(3px)}
+.plt-tip--left::before{top:50%;right:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));margin-top:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));border-left-color:var(--plt-tip-border,rgba(150,175,215,.30))}
+.plt-tip--left::after{top:50%;right:calc(-1 * var(--plt-tip-arrow,5px));margin-top:calc(-1 * var(--plt-tip-arrow,5px));border-left-color:var(--plt-tip-bg,rgba(34,42,56,.97))}
+/* —— 右：箭头朝左 —— */
+.plt-tip--right{transform:translateX(-3px)}
+.plt-tip--right::before{top:50%;left:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));margin-top:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));border-right-color:var(--plt-tip-border,rgba(150,175,215,.30))}
+.plt-tip--right::after{top:50%;left:calc(-1 * var(--plt-tip-arrow,5px));margin-top:calc(-1 * var(--plt-tip-arrow,5px));border-right-color:var(--plt-tip-bg,rgba(34,42,56,.97))}
+/* 文字装在内层，外层只负责边框、箭头与定位（id=251）。
+   高度上限由脚本按面板高度写进 style，这里只声明「超了就裁」——
+   放在外层会连箭头的位子一起裁掉，所以只能在内层裁。 */
+.plt-tip-inner{overflow:hidden}
+/* 气泡贴边翻到另一侧时，箭头不需要跟着重描 —— 方向类一换，上面四组自动就位。 */
+
+/* 用户要求减少动效：连位移一起撤掉，只保留瞬时显隐（不做淡入也照样能读）。 */
+@media (prefers-reduced-motion: reduce){
+  .plt-tip{transition:none;transform:none}
+}
+/* 浅色不需要额外规则：颜色全部来自变量，而变量在 30-light.js 里已经换过一套。
+   这里刻意不写 body:not([data-ds-dark-theme]) 覆盖 —— 多一套就多一处会忘记同步的地方。 */
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【5】输入区骨架
+ * 源：20-css/12-composer.js（1 条规则）
+ * 列表容器：外层绝不出滚动条，只有展开的组内部滚动。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* 外层列表自己绝不出滚动条：高度固定，只有展开的组内部滚动。 */
+/* 列表容器：左右/下多留一点内边距，给三个组的外阴影留出扩散空间（否则会被 overflow 裁掉）。 */
+.plt-list{flex:1 1 auto;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:9px;padding:8px 18px 16px 18px}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【6】输入控件与表单
+ * 源：20-css/17-input.js（31 条规则）
+ * 输入框、表单包装、发送按钮底座。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+.plt-input{width:100%;box-sizing:border-box;background:var(--dsw-alias-bg-tertiary,rgba(0,0,0,.2));color:inherit;border:1px solid var(--dsw-alias-border-secondary,rgba(255,255,255,.14));border-radius:6px;padding:6px 8px;font-size:16px;font-family:inherit;resize:vertical;min-height:104px;line-height:1.5}
+.plt-input::placeholder{font-size:16px;color:var(--dsw-alias-label-tertiary,#6b7280)!important;opacity:1!important}
+/* —— Cursor 式输入区：整块一个圆角框，文字在上、胶囊标签在左下、圆形发送键在右下 ——
+   （卡片外观与悬浮效果定义在 .plt-composer 的上面那段，这里只管内部排版） */
+/* 输入区高度（id=152）：从固定的 104px 加高到 clamp(104px, 26cqh, 176px)。
+   26cqh 按「本面板高度」算：常见窗口下取到上限 176px，输入面积比原来大六成；
+   侧栏被拖矮时自动收到 104px 下限，把列表的空间让出来。 */
+.plt-composer .plt-input{background:transparent;border:none;border-radius:0;padding:2px 2px 0;min-height:clamp(104px,26cqh,176px);resize:none;outline:none;line-height:1.55;caret-color:var(--dsw-alias-label-accent,#7fb0ff)}
+/* 面板被拖到很矮时分档收缩（id=152）：26cqh 在 340px 以下已经到底限 104px，
+   再矮就会把列表和操作条挤出面板。逐档收输入框、内外边距、胶囊与按钮尺寸，
+   保证「操作条始终完整可见、列表至少留一行」。 */
+@container (max-height: 340px){
+  .plt-composer .plt-input{min-height:64px}
+  .plt-form-wrap{padding-top:6px;padding-bottom:8px}
+  .plt-list{padding-top:4px;padding-bottom:8px}
+}
+@container (max-height: 260px){
+  .plt-composer .plt-input{min-height:52px}
+  .plt-composer{gap:5px}
+  .plt-form-wrap{padding:5px 10px 6px 10px}
+}
+@container (max-height: 200px){
+  .plt-composer .plt-input{min-height:38px}
+  .plt-chip{padding:3px 8px}
+  .plt-deep-toggle,.plt-send{width:26px;height:26px}
+  .plt-form-wrap{padding:4px 8px 5px 8px}
+  .plt-list{padding-top:2px;padding-bottom:4px}
+}
+/* 暗色调：placeholder 用中灰而不是浅灰，避免整块看起来发白。
+   注意：主题包 dsh-official-homepage-theme 会无条件给所有 input 的 placeholder
+   打上 color:rgba(193,208,228,.72) !important（浅白蓝），在浅色主题的白底上等于隐形。
+   这里必须同样用 !important 才能在层叠里压过它，否则默认提示文字会整个消失。 */
+.plt-composer .plt-input::placeholder{color:var(--dsw-alias-label-tertiary,#6b7280)!important;opacity:1!important}
+/* 胶囊标签在暗底上再压深一档，保持「暗色调」的统一。 */
+.plt-composer .plt-chip{background:rgba(255,255,255,.045);border-color:rgba(255,255,255,.07);color:var(--dsw-alias-label-secondary,#aab2bf)}
+.plt-composer .plt-chip:hover:not(:disabled){background:rgba(255,255,255,.09)}
+/* 输入框下方的操作条：胶囊组 + D/F/S 三个圆钮，永远排成一行，不换行也不溢出（id=145）。
+   宽度不够时按阶梯收缩：先收间距与内边距，最窄一档把胶囊文字换成纯图标
+   （文字语义仍在 title / aria-label 上），这样四枚胶囊 + 三个圆钮始终齐整一行。 */
+.plt-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;row-gap:6px;min-width:0;container-type:inline-size}
+/* 面板窄到连纯图标的一行都放不下时，只让「三个圆钮」整体折到第二行并靠右，
+   胶囊组始终完整一行、绝不截断 —— 这种情况下换行比切掉发送钮好。 */
+.plt-bar>.plt-deep-toggle{margin-left:auto}
+/* 胶囊组：横向可收缩但绝不换行；真的放下了也不许把胶囊截断，
+   所以下限设 min-content —— 到那一步之前 .plt-chip-txt 已经被隐藏了。 */
+.plt-chips{display:flex;flex-wrap:nowrap;align-items:center;gap:6px;flex:1 1 auto;min-width:min-content;overflow:hidden;scrollbar-width:none}
+.plt-chips::-webkit-scrollbar{display:none}
+/* 一个「段」= 可选连接符 + 一枚胶囊，段内不拆开，换行时连接符永远不会变成孤儿。 */
+.plt-seg{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto}
+/* 任务类型胶囊：定高 28px、左右内边距固定，四枚按钮高度与基线才能完全对齐。
+   高度写死而不靠 padding 撑，是因为图标 13px 的中文行盒会随字体不同浮 1px。 */
+.plt-bar .plt-chip{height:28px;box-sizing:border-box;padding:0 10px;justify-content:center}
+/* 连接符（类型之间的「-」、拆解前的「+」）：定高与胶囊等高，靠 flex 居中，
+   这样它和两侧文字的中线永远在同一条线上；左右由 .plt-seg 的 gap 拉开，因此等距。
+   不能被选中，也不要响应鼠标。 */
+.plt-op{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;height:28px;width:10px;font-size:14px;line-height:1;font-family:inherit;color:var(--dsw-alias-label-caption,#8a8a8a);opacity:.7;user-select:none;-webkit-user-select:none;pointer-events:none}
+/* 窄一档：先收间距与内边距。 */
+@container (max-width:560px){.plt-chips,.plt-seg{gap:4px}.plt-bar .plt-chip{padding:0 8px}}
+/* 关键一档：图标+文字一起放不下时，先去掉图标、字号降一号 ——
+   四个类型靠文字区分，读起来比看图省事，所以先舍图标而不是先舍文字。 */
+@container (max-width:470px){.plt-bar .plt-chip-ico{display:none}.plt-bar .plt-chip{padding:0 9px;font-size:13px}.plt-chip-split{padding:0 9px}}
+/* 再窄：连纯文字也挤了，才退回纯图标（语义仍在 title / aria-label 上）。 */
+@container (max-width:360px){.plt-bar .plt-chip-txt{display:none}.plt-bar .plt-chip-ico{display:inline-flex}.plt-bar .plt-chip{padding:0 8px;font-size:14px}.plt-chip-split{padding:0 8px;border-radius:8px}}
+/* 极窄面板：再收一档间隙。 */
+@container (max-width:330px){.plt-chips,.plt-seg{gap:3px}.plt-bar .plt-chip{padding:0 5px}.plt-chip-split{padding:0 5px}.plt-bar{gap:6px}}
+
+/* ────────────────────────────────────────────────────────────
+ * 条目与内容（条目、分组、详情、子任务、批量区、胶囊）
+ * 源文件：src/styles/02-content.css（279 条规则）
+ * ──────────────────────────────────────────────────────────── */
+/* ============================================================================
+ * DSH「任务列表」插件样式 · 第 2/3 段：条目与内容
+ * ============================================================================
+ *
+ * 顺序见 01-base.css 顶部说明：01 → 02 → 03 由文件名固化，不要改名。
+ *
+ * 本段是三段里规则最多的一段（约 300 条），也是**层叠最敏感**的一段：
+ * 条目、分组、子任务、批量区之间存在多处「后写者胜」的覆盖关系，例如
+ *   组内条目  ⊃ 基础条目（.plt-group-body .plt-item 覆盖 .plt-item）
+ *   待执行组  ⊃ 通用组（.plt-group-todo .plt-item 覆盖 .plt-group-body .plt-item）
+ * 分区顺序基本沿「从外到内」排：条目骨架 → 分组 → 详情 → 子任务 → 批量区 → 胶囊。
+ * 搬运时（79-C）请**保持分区内的相对顺序**，不要按字母重排。
+ * ========================================================================== */
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【7】条目骨架
+ * 源：20-css/13-item.js（68 条规则｜7 个 @keyframes｜11 条 animation）
+ * 卡片边框、悬浮、拖拽落点、展开/折叠头部、抓手、到达动画。
+ * ⚠ 动画：plt-drop-in、plt-sublime-in、plt-vapor、plt-dropped、
+ *         plt-arrive、plt-arrive-caret、plt-arrive-count（79-D 专项处理）
+ * ⚠ 注意：`plt-dropped` 既是 @keyframes 名，也是类名 `.plt-dropped` 的一部分。
+ *   文本替换时极易只改到一半 —— 搬运动画定义与类规则时务必分别确认。
+ * ⚠ 顺序约束：`.plt-item.plt-dropped` 必须排在 `.plt-item.plt-sublime` 之后
+ *   （两者都设 animation，后者需被前者覆盖）。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+.plt-item{border:1px solid var(--dsw-alias-border-secondary,rgba(255,255,255,.09));border-radius:8px;margin-bottom:7px;overflow:hidden;background:var(--dsw-alias-bg-secondary,rgba(255,255,255,.02));transition:opacity .12s ease,border-color .12s ease}
+.plt-item.open{border-color:var(--dsw-alias-border-accent,rgba(80,140,255,.6))}
+/* 正在执行：淡一点的暖黄内阴影，表示「模型正在这一条上干活」，不抢眼。
+   （mBSaIn 前是粉红；改黄后这条注释里的颜色词也跟着改，免得下一个人以为是红。） */
+/* 执行中不再加圆点，只靠边框/内阴影与「正在执行」标签区分。 */
+/* 拖拽三态（id=397）：让待执行组里的拖拽排序「丝滑一点」。
+   原来是两行光秃秃的规则（.dragging 半透明虚线、.drop-target 一条内阴影边），
+   状态切换是硬跳：抓手按下 → 卡片瞬间变虚；经过别人 → 边上突然出现一条线；
+   松手 → 全部瞬间消失。三段都没有过渡，观感是「闪」。
+
+   现在按「被拖的」「被路过的」「刚落下的」三种角色分别给动效，
+   核心原则是**只动 transform / opacity / box-shadow**（不碰 width/height/margin），
+   否则会触发重排，越"动画"越卡。
+
+   · 被拖的（.dragging）：整卡轻微缩小 + 抬起（阴影）+ 虚线边框。
+     缩放用 0.985 而不是 0.95 —— 卡片本来就只有侧栏那么宽，
+     缩太多会像"飞走了"，不如像"被手指按住抬起来"。
+   · 被路过的（.drop-target）：左边弹出一条 accent 竖条 + 淡色底 + 轻微抬升。
+     竖条用 ::before 画（不占布局），比原来那条 inset 内阴影更明确地指出"会插在这里"。
+     同时加一个很短的 keyframes（plt-drop-in）让它在**刚成为目标的那一刻**
+     有个从窄到宽的展开感 —— 这才是"丝滑"的来源：状态切换有过程，而不是跳变。
+   · 刚落下的（.plt-dropped）：松手后一记轻微回弹（1.1 → 1.0），
+     确认"放下去了"。0.32s，比升华动画短得多 —— 拖拽是高频操作，
+     反馈要快，不能每次都让人等 0.9s。
+   三者都尊重 prefers-reduced-motion（见文件末尾那条 reduce 规则）。 */
+.plt-item{transition:opacity .12s ease,border-color .12s ease,transform .16s cubic-bezier(.2,.7,.3,1),box-shadow .16s ease}
+.plt-item.dragging{opacity:.55;border-style:dashed;transform:scale(.985);box-shadow:0 8px 20px -10px rgba(0,0,0,.55)}
+.plt-item.drop-target{position:relative;border-color:var(--dsw-alias-border-accent,rgba(80,140,255,.85));box-shadow:inset 0 2px 0 -1px rgba(80,140,255,.9);background-color:rgba(80,140,255,.07);transform:translateX(1px)}
+/* 竖条：绝对定位贴在卡片左缘，不参与布局，所以出现/消失都不会推动任何东西。 */
+.plt-item.drop-target::before{content:'';position:absolute;left:0;top:6px;bottom:6px;width:3px;border-radius:0 3px 3px 0;background:var(--dsw-alias-bg-accent,rgba(80,140,255,.95));animation:plt-drop-in .18s cubic-bezier(.2,.7,.3,1) both}
+@keyframes plt-drop-in{0%{opacity:0;transform:scaleY(.35)}100%{opacity:1;transform:scaleY(1)}}
+/* 刚落下：一记极短的回弹，告诉用户"放好了"。
+   规则本体在下方 sublime 之后（位置有讲究，那里写了原因）。 */
+/* 转组「升华」动画：待执行 → 待审核 → 已审核 换栏的那一次，
+   在新一栏里从下方轻轻浮起（带一点虚化收焦），同时一层同色微光向上蒸腾消散。
+   只在真正换组时播一遍（约 1.1s），平时不打扰。 */
+.plt-item.plt-sublime{position:relative;animation:plt-sublime-in .86s cubic-bezier(.16,.86,.24,1) both}
+.plt-item.plt-sublime::before{content:'';position:absolute;inset:-1px;pointer-events:none;border-radius:inherit;background:linear-gradient(0deg,rgba(var(--plt-accent,140,140,140),.22),rgba(var(--plt-accent,140,140,140),.07) 52%,transparent 82%);opacity:0;animation:plt-vapor 1.2s ease-out .04s both}
+/* 缓入缓出、位移和虚化都收小：观感像被"托"上来，而不是被拍上去。 */
+@keyframes plt-sublime-in{0%{opacity:.001;transform:translateY(9px) scale(.996);filter:blur(1.5px)}40%{opacity:.58;filter:blur(.7px)}74%{opacity:.93;filter:blur(.2px)}100%{opacity:1;transform:none;filter:none}}
+@keyframes plt-vapor{0%{opacity:.40;transform:translateY(24%)}46%{opacity:.24}100%{opacity:0;transform:translateY(-30%)}}
+/* id=397：回弹规则刻意排在 sublime 之后（见上方注释）——
+   两者都写 animation，后出现者胜，先播亲手落地的反馈。 */
+.plt-item.plt-dropped{animation:plt-dropped .32s cubic-bezier(.2,.7,.3,1) both}
+@keyframes plt-dropped{0%{transform:scale(1.035)}58%{transform:scale(.995)}100%{transform:none}}
+/* 落到「折叠着」的组里时条目本身看不见：让那一组的组头轻轻亮一下，
+   这样审核通过（待审核 → 已审核）也有反馈，不会被当成"没反应"。 */
+.plt-group-h.plt-arrive{animation:plt-arrive .92s cubic-bezier(.16,.86,.24,1) both}
+.plt-group-h.plt-arrive .plt-caret{animation:plt-arrive-caret .92s cubic-bezier(.16,.86,.24,1) both}
+.plt-group-h.plt-arrive .plt-group-count{animation:plt-arrive-count .92s ease-out both}
+@keyframes plt-arrive{0%{box-shadow:inset 0 0 0 1px rgba(var(--plt-accent,140,140,140),0);background-color:rgba(var(--plt-accent,140,140,140),0)}26%{box-shadow:inset 0 0 0 1px rgba(var(--plt-accent,140,140,140),.52),0 0 16px -6px rgba(var(--plt-accent,140,140,140),.42);background-color:rgba(var(--plt-accent,140,140,140),.15)}100%{box-shadow:inset 0 0 0 1px rgba(var(--plt-accent,140,140,140),0);background-color:rgba(var(--plt-accent,140,140,140),0)}}
+@keyframes plt-arrive-caret{0%,100%{transform:none}34%{transform:translateY(-2px)}68%{transform:translateY(1px)}}
+@keyframes plt-arrive-count{0%,100%{transform:none}30%{transform:scale(1.14)}}
+@media (prefers-reduced-motion: reduce){.plt-item.plt-sublime{animation:none}.plt-item.plt-sublime::before{animation:none;opacity:0}.plt-group-h.plt-arrive,.plt-group-h.plt-arrive .plt-caret,.plt-group-h.plt-arrive .plt-group-count{animation:none}}
+/* id=397：减弱动画时拖拽三态一律不做位移/缩放/弹跳 ——
+   但**保留**虚线边框、竖条与淡色底这些静态线索（它们承载「这里会插入」的信息，
+   不是装饰）。所以只关掉 animation 与 transform，不关 opacity/border/box-shadow。 */
+@media (prefers-reduced-motion: reduce){.plt-item{transition:opacity .12s ease,border-color .12s ease}.plt-item.dragging,.plt-item.drop-target{transform:none}.plt-item.drop-target::before,.plt-item.plt-dropped{animation:none}}
+.plt-head{position:relative;display:flex;align-items:center;gap:8px;padding:11px 10px;cursor:pointer;user-select:none;transition:background .14s ease,box-shadow .16s ease}
+/* hover：整行明显提亮 —— 左侧浓、右侧淡的横向渐变 + 左缘 3px 强调竖条 +
+   一圈同色内描边并轻微右移，鼠标划到哪一行一眼就能看出来。 */
+.plt-head:hover{background:linear-gradient(90deg,rgba(var(--plt-accent,140,140,140),.30),rgba(var(--plt-accent,140,140,140),.14) 45%,rgba(var(--plt-accent,140,140,140),.04) 92%);box-shadow:inset 0 0 0 1px rgba(var(--plt-accent,140,140,140),.28),inset 0 1px 0 rgba(var(--plt-accent,140,140,140),.16)}
+.plt-head:hover::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:0 3px 3px 0;background:rgba(var(--plt-accent,140,140,140),1);box-shadow:0 0 10px 0 rgba(var(--plt-accent,140,140,140),.55)}
+.plt-head:hover .plt-name{color:var(--dsw-alias-label-primary,#f0f2f5);font-weight:600}
+.plt-head:hover .plt-caret{color:rgba(var(--plt-accent,140,140,140),1);transform:translateX(2px)}
+.plt-head:hover .plt-id{opacity:1;color:rgba(var(--plt-accent,140,140,140),1);font-weight:600}
+.plt-head:hover .plt-grip{color:rgba(var(--plt-accent,140,140,140),1)}
+.plt-head:hover .plt-tag{border-color:rgba(var(--plt-accent,140,140,140),.5)}
+@media (prefers-reduced-motion: reduce){.plt-head,.plt-head:hover .plt-caret{transition:none;transform:none}}
+.plt-grip{flex:0 0 auto;width:12px;cursor:grab;color:var(--dsw-alias-label-caption,#777);line-height:1;letter-spacing:-1px;font-size:14px}
+.plt-grip:active{cursor:grabbing}
+.plt-grip-off{cursor:default;opacity:0;pointer-events:none}
+.plt-caret{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:12px;color:var(--dsw-alias-label-caption,#8a8a8a);transition:transform .12s ease,color .14s ease}
+.plt-item.open .plt-caret{transform:rotate(90deg)}
+.plt-group{margin-bottom:0;display:flex;flex-direction:column;min-height:0;flex:0 0 auto;overflow:hidden;border:1px solid transparent;border-radius:10px;transition:border-color .12s ease,background .12s ease,box-shadow .16s ease}
+/* 每个组（含折叠态）都带一层柔和外阴影，让三栏像三张卡片浮在面板上。 */
+.plt-group-reviewed,.plt-group-unreviewed,.plt-group-todo{box-shadow:0 1px 2px rgba(0,0,0,.1),0 6px 16px -10px rgba(0,0,0,.4),0 0 0 0 rgba(var(--plt-accent,140,140,140),0)}
+.plt-group-reviewed:hover,.plt-group-unreviewed:hover,.plt-group-todo:hover{box-shadow:0 1px 3px rgba(0,0,0,.12),0 10px 22px -12px rgba(0,0,0,.46),0 0 18px -10px rgba(var(--plt-accent,140,140,140),.55)}
+/* 手风琴互斥：只有一个组展开，它吃掉剩余全部高度；折叠的组只留 34px 组头。
+   三个组头永远同高同字号，切组时二级菜单可用高度一致，页面不跳。 */
+.plt-group.open{flex:1 1 auto;min-height:0;border-color:rgba(var(--plt-accent,140,140,140),.3);background:rgba(var(--plt-accent,140,140,140),.035);box-shadow:0 2px 4px rgba(0,0,0,.16),0 16px 34px -14px rgba(0,0,0,.55),0 0 0 1px rgba(var(--plt-accent,140,140,140),.10),0 0 30px -12px rgba(var(--plt-accent,140,140,140),.7)}
+/* 组头高度固定：三个组永远一样高，展开/折叠时不会被内容压扁。文字大一号，高度跟着加到 38px。 */
+.plt-group-h{flex:0 0 auto;display:flex;align-items:center;gap:8px;height:38px;min-height:38px;padding:0 10px;box-sizing:border-box;cursor:pointer;user-select:none;border-radius:8px;background:var(--dsw-alias-bg-secondary,rgba(255,255,255,.03));border:1px solid var(--dsw-alias-border-secondary,rgba(255,255,255,.07));position:sticky;top:0;z-index:3;backdrop-filter:blur(6px)}
+.plt-group-h:hover{background:var(--dsw-alias-bg-hover,rgba(255,255,255,.06))}
+.plt-group-h.open .plt-caret{transform:rotate(90deg)}
+.plt-group-name{flex:1 1 auto;font-size:14.5px;font-weight:600;color:var(--dsw-alias-label-secondary,#c8c8c8);letter-spacing:.02em}
+/* id=337：条数统计固定在组头最右端（DOM 里也确实排在所有控件之后）。
+   margin-left:auto 是双保险：即使将来有人在它后面又插了节点，读数仍然贴着右侧收口。
+   等宽数字（tabular-nums）+ 三位补零：001 / 012 / 123 宽度一致，
+   组与组之间同一列对齐，展开收起时右边界不会跟着数字位数抖。 */
+.plt-group-count{flex:0 0 auto;margin-left:auto;min-width:46px;box-sizing:border-box;text-align:center;font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;font-size:12.5px;line-height:18px;padding:0 7px;border-radius:999px;background:var(--dsw-alias-bg-hover,rgba(255,255,255,.08));color:var(--dsw-alias-label-caption,#9a9a9a)}
+/* id=391：原来那个组头下拉已随「待审核自动通过」一起删除。
+   它是待审核组头唯一的控件，删掉之后四组的组头形状终于一致：
+   名字 + 条数统计。窄屏那条 @container 里只剩 .plt-group-h{gap:6px}，
+   仍然有效（收窄时组头内距收紧），所以保留。 */
+@container (max-width:320px){.plt-group-h{gap:6px}}
+/* 组内自成滚动区：组头留在外面所以始终可见，条目在这一块里内滚动。
+   左右各留 9px，条目不再顶着组的边框。 */
+.plt-group-body{display:flex;flex-direction:column;gap:6px;padding:8px 9px 9px;overflow:auto;flex:1 1 auto;min-height:0;scrollbar-width:thin;scrollbar-color:rgba(var(--plt-accent,140,140,140),.45) transparent}
+.plt-group-body::-webkit-scrollbar{width:7px}
+.plt-group-body::-webkit-scrollbar-thumb{background:rgba(var(--plt-accent,140,140,140),.42);border-radius:4px;border:1px solid transparent;background-clip:padding-box}
+.plt-group-body::-webkit-scrollbar-thumb:hover{background:rgba(var(--plt-accent,140,140,140),.62);background-clip:padding-box}
+.plt-group-body::-webkit-scrollbar-track{background:rgba(var(--plt-accent,140,140,140),.06);border-radius:4px}
+/* 组内是「二级」内容，整体比组头小一档，统一 13px。 */
+/* 关键：flex 列容器 + max-height 会让子项被压扁成一条横条，必须禁止收缩。 */
+.plt-group-body > *{flex:0 0 auto}
+.plt-group-body .plt-item{flex:0 0 auto}
+.plt-group-body .plt-name{font-size:13px}
+.plt-group-body .plt-tag{font-size:13px;line-height:18px;padding:0 6px}
+/* 组内条目：横向内边距收窄一点，把省下的宽度全给标题。 */
+.plt-group-body .plt-head{padding:9px 8px;gap:6px}
+.plt-group-body .plt-caret,.plt-group-body .plt-grip{font-size:13px}
+.plt-group-body .plt-body{padding:2px 10px 10px 24px}
+.plt-group-body .plt-sec-h{font-size:13px}
+.plt-group-body .plt-plan,.plt-group-body .plt-note{font-size:13px;line-height:1.6}
+.plt-group-body .plt-meta{font-size:13px;gap:5px 12px}
+.plt-group-body .plt-check{font-size:13px;gap:5px}
+.plt-group-body .plt-check input{width:14px;height:14px}
+.plt-group-body .plt-check.locked span::after{font-size:13px}
+.plt-group-body .plt-btn{font-size:13px;padding:2px 8px}
+.plt-group-body .plt-body code{font-size:13px}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【8】分组与配色
+ * 源：20-css/14-groups.js（56 条规则｜2 个 @keyframes｜4 条 animation）
+ * 三组的强调色 --plt-accent（已审核=灰、待审核=黄、待执行=绿）、组头、
+ * 组内滚动区、运行中扫光。
+ * ⚠ 动画：plt-group-sheen（组头收起态扫光）。
+ *   plt-sheen（执行中那一行的卡片扫光）已在 id=85-A 移除，keyframes 一并删除。
+ * ⚠ 改色注意：组色在「深色段（本文件）」与「浅色段（03-theme.css）」两处，
+ *   但「执行中」状态有 16 处硬编码色值散在 4 个文件里，不跟 --plt-accent 走。
+ *   只改组 accent 会出现「组是绿的、里面跑着的还是粉的」。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* —— 分组配色：每组一个强调色，组头与条目共用同一套 --plt-accent —— */
+/* 三组配色：已审核=灰，待审核=黄，待执行=绿。
+   id=405 草稿组（原本也是绿）已删除；id=406 把待执行从粉红改成绿 ——
+   「待办 = 绿色」比粉红更符合直觉（可开工 / 进行中）。 */
+.plt-group{--plt-accent:140,140,140}
+.plt-group-reviewed{--plt-accent:156,163,175}
+.plt-group-unreviewed{--plt-accent:255,180,60}
+/* 待执行整组走绿色主题：组头、计数、条目、二级内容全部跟着 --plt-accent 走。 */
+.plt-group-todo{--plt-accent:var(--plt-todo,46,160,67)}
+
+/* 组头：叠在组体绿底之上，要比组体**更亮一档**才有层次。
+ *
+ * 原来 α=.12 —— 在组体只有 .055 时够用；组体提到 .30 之后，
+ * .12 只让组头比组体亮 16，两者几乎糊成一片，层次反了。
+ * 取 .30：比组体亮 42，组头明确浮在组体之上。
+ * （组头的背景是叠在组体背景上的，所以它是"二次叠加"，不是绝对值。） */
+/* id=Vrfpg7-B：组头透明度对齐「带审核」的 .plt-group-h 第二条规则（.055 / .2）。
+   原 .30/.5 是后者的 5~2.5 倍，两组并排时待执行的组头像一条实心绿带。 */
+.plt-group-todo .plt-group-h{background:rgba(var(--plt-todo,46,160,67),.055);border-color:rgba(var(--plt-todo,46,160,67),.2)}
+/* 待执行组不再单独压缩：三组样式完全统一，切组时二级菜单高度一致。 */
+.plt-group-todo .plt-group-body{gap:6px;padding:8px 9px 9px}
+
+/* ── 待执行组：完整分组样式（id=1-B）────────────────────────────────────────
+ *
+ * 1-A 的结论：class 一直挂着（`plt-group plt-group-todo`），选择器也全都在，
+ * 问题出在**权重** —— `.plt-group-todo`（[0,1,0]）被 `.plt-group.open`（[0,2,0]）
+ * 接管。虽然有 .open 时颜色恰好相同，但一旦组是**收起态**（无 .open），
+ * 就只剩 `.plt-group{border:1px solid transparent}` —— 那正是用户说的
+ * 「只有个白色 border」。
+ *
+ * 所以这里补的是一套**不依赖 .open** 的完整外观，并且把权重提到 [0,2,0]
+ * （`.plt-root` 前缀）与 `.plt-group.open` 平级、靠顺序在后胜出；
+ * 再对 `.open` 单独给一档更强的值，两种状态都有明确归属。
+ *
+ * 题面要求逐项覆盖：背景色 / 圆角 / 内边距 / 与相邻分组间距 /
+ * 标题字号·字重·颜色 / 空列表占位高度。
+ *
+ * 配色全部走 var(--plt-todo,46,160,67)（绿），与已审核（灰）、待审核（琥珀）
+ * 是同一套变量体系，只是换色相 —— 这才是"风格统一"的意思。 */
+.plt-root .plt-group-todo{
+  /* 背景：**要明显看得出是绿**。
+   *
+   * 这条反馈一共走了四轮，把每一步的实测差记在这里，省得下次再猜：
+   *
+   *   α=.035 (Kp86HX) → rgb(23,30,29)  差  8   与面板同色
+   *   α=.055 (1-B)    → rgb(23,31,30)  差 10   与面板同色，用户说"完全没绿"
+   *   α=.18  (Rczii8) → rgb(26,48,35)  差 35   能看出来，但用户说"微微绿色"
+   *   α=.30  (本条)   → rgb(29,65,40)  差 60   **明显是绿**
+   *
+   * 参照系：深色面板底 rgb(22,24,28)。差值 45~70 是"明显但不刺眼"的区间；
+   * 超过 90 会发荧光、盖过组里的卡片。取 .30 落在区间中段。
+   *
+   * 前两轮之所以无效，是因为按**白底**的经验挑 α ——
+   * 深色底会把低透明度颜色吃掉：同样的 α 在白底上一眼可见，在 rgb(22,24,28) 上直接消失。
+   * 所以这类调整不能凭感觉，要算 α 叠加到具体底色之后的像素差。
+   *
+   * ── id=Vrfpg7-B：**按题面要求退回 .035，与「带审核」逐项对齐** ──────────
+   *
+   * 题面明确要求：把透明度的每一项改成与「带审核」一致，只改透明度、
+   * 不动绿色主色，目标是两组并排时**浓度接近、仅色相不同**。
+   *
+   * 「带审核」没有专属覆盖，全部走通用规则：
+   *   容器底 .035 / 容器边 .3 / 组头 .055·.2 / 卡片 .04·.18 / 计数 .08 / 标签边 .14
+   *
+   * 这一改**把上面四轮迭代的结论推回去了**（.035 曾被用户判为"与面板同色、完全没绿"）。
+   * 已在执行前向用户确认：本条优先于历史观感，按题面执行。
+   * 若后续又觉得"没绿"，那不是透明度没调对，而是这条要求本身与观感诉求相反 ——
+   * **要回到 .30，直接改这一个值即可，其余项保持与带审核一致。** */
+  background:rgba(var(--plt-todo,46,160,67),.035);
+  /* 圆角：与 .plt-group 基础一致，显式写出以免被后续规则改掉 */
+  border-radius:10px;
+  /* 边框：与「带审核」的 .3 对齐（原 .72） */
+  border-color:rgba(var(--plt-todo,46,160,67),.3);
+  /* 与相邻分组的间距：**不在这里设 margin**。
+     `.plt-list{gap:9px}` 已经是三组间距的唯一来源（01-base.css:492），
+     各组自己的 margin-bottom 都是 0。在这里加 margin 会让待执行组
+     比另两组多出一截，反而破坏"风格统一" —— 这正是题面要的反面。 */
+}
+/* id=Vrfpg7-B：展开态原本「比收起再实一档」（.38/.85），但那让待执行组
+   比「带审核」浓得多 —— 对方展开时仍是 .plt-group.open 的 .035/.3，没有专属覆盖。
+   这里直接对齐同值：两组展开后浓度一致，只有色相不同。
+   （收起态与展开态在「带审核」那边本来就长得一样，这里也保持一致。） */
+.plt-root .plt-group-todo.open{
+  border-color:rgba(var(--plt-todo,46,160,67),.3);
+  background:rgba(var(--plt-todo,46,160,67),.035);
+}
+
+/* 内边距：组体留白与另两组同源（.plt-group-body 已有 8px 9px 9px，
+   这里补的是**组头**的内边距，让三组的组头文字起始位置一致） */
+.plt-root .plt-group-todo .plt-group-h{padding:0 10px}
+
+/* 标题：字号/字重与其它组一致（14.5px / 600）。
+ *
+ * 颜色（id=kjSFlr）：由 rgba(var(--plt-todo,46,160,67),.98) 改为 var(--plt-todo-fg,187,247,208)。
+ * 原因是组头底色加深到 .30 之后，**绿字压绿底**只有 2.30:1 —— 远低于 4.5 门槛，
+ * 组名会糊在背景里。--plt-todo-fg 是 #bbf7d0（浅绿），在同一个组头上 6.39:1，
+ * 既达标又保持"这是绿组"的色相。
+ *
+ * 这是加深底色的连带代价：底色一变深，原本"够用"的前景色就不够了。
+ * 不另立字号 —— 三组标题必须同号，否则切换分组时基线跳动。 */
+.plt-root .plt-group-todo .plt-group-name{
+  font-size:14.5px;
+  font-weight:600;
+  color:rgb(var(--plt-todo-fg,187,247,208));
+  letter-spacing:.02em;
+}
+
+/* 空列表占位：收起态由 .plt-group-empty 撑满（flex:1 1 auto），
+   但待执行组是 alwaysShow 的，没有条目时高度会塌成只有组头 ——
+   给一个最小高度，保证"空组"仍然是一块像样的区域而不是一条缝。 */
+.plt-root .plt-group-todo .plt-group-empty{
+  min-height:72px;
+  padding:14px 12px;
+  /* id=kjSFlr：由 rgba(var(--plt-todo,46,160,67),.85) 改为 --plt-todo-fg。
+     绿字压在加深后的组底（α=.30）上只有 2.87:1，读不清；
+     换成浅绿后 6.39:1，与组名同一套处理。 */
+  color:rgb(var(--plt-todo-fg,187,247,208));
+}
+.plt-group-h{background:rgba(var(--plt-accent,140,140,140),.055);border-color:rgba(var(--plt-accent,140,140,140),.2)}
+.plt-group-h:hover{background:rgba(var(--plt-accent,140,140,140),.11)}
+.plt-group-h .plt-caret{color:rgba(var(--plt-accent,140,140,140),.95)}
+.plt-group-name{color:rgba(var(--plt-accent,140,140,140),.98)}
+.plt-group-count{background:rgba(var(--plt-accent,140,140,140),.16);color:rgba(var(--plt-accent,140,140,140),1);border:1px solid rgba(var(--plt-accent,140,140,140),.28)}
+/* 条目：绿色/黄色内阴影区分状态。 */
+.plt-group-body .plt-item{background:rgba(var(--plt-accent,140,140,140),.04);border-color:rgba(var(--plt-accent,140,140,140),.18);box-shadow:inset 0 0 0 1px rgba(var(--plt-accent,140,140,140),.05),inset 0 0 20px -10px rgba(var(--plt-accent,140,140,140),.55)}
+.plt-group-body .plt-item:hover{border-color:rgba(var(--plt-accent,140,140,140),.32)}
+.plt-group-body .plt-item.open{border-color:rgba(var(--plt-accent,140,140,140),.5);box-shadow:inset 0 0 0 1px rgba(var(--plt-accent,140,140,140),.12),inset 0 0 26px -8px rgba(var(--plt-accent,140,140,140),.6)}
+/* 正在执行的条目优先级最高，保留粉红内阴影，不被分组配色盖掉（淡一点）。 */
+/* id=401：原来这里还有一条「待执行组里的状态标签走粉红」的规则，早已删除。
+   id=407：紧接着的「空心圆点」方案也一并移除了 —— 待执行组现在**不画任何状态标记**，
+   身份完全由组色（绿）表达，与待审核 / 已审核「组名即状态」同一口径。
+   所以这段不再需要说明某个标记的配色。 */
+/* id=85-B：徽标文字改用 --plt-todo-fg，不再用「主色套 .78 透明度」。
+   原来写 rgba(var(--plt-todo,46,160,67),.78) 时，红色只有 3.54:1（本来就不够）；
+   换成绿色后 .78 是 3.68:1 —— 仍是同一条线上不达标。
+   fg 变体就是为"小字压在深底上"准备的，直接用它是正解，
+   而不是把透明度从 .78 调到 .9（那样仍然 4.48:1，差一点）。
+   边框保持低透明度：它只是轮廓，不承担可读性。 */
+/* id=Vrfpg7-B：标签边框透明度对齐带审核（.3 → .14）。 */
+.plt-group-todo .plt-tag.type{color:rgb(var(--plt-todo-fg,187,247,208));border-color:rgba(var(--plt-todo,46,160,67),.14)}
+/* ── 待执行组的卡片：自己也要带绿（id=twRXzh）─────────────────────────────
+ *
+ * 这是第五轮才找到的真因 —— 前四轮一直在调**组容器**的底色透明度
+ * （.035 → .055 → .18 → .30，实测差 8 → 10 → 35 → 60），反馈始终是
+ * 「只有一个白色边框」。原因不在透明度，在**面积**：
+ *
+ *   .plt-group-body{gap:6px; padding:8px 9px 9px}
+ *   .plt-item{background:rgba(255,255,255,.02)}   ← 近白、几乎不透明
+ *
+ * 一个组里 3 张卡片时，卡片占组体高度约 **82%**，绿底只从
+ * padding 与 gap 的缝隙里露出 **18%**。组容器底色加到多深都只影响那 18%，
+ * 视觉上自然是"整块都是白，只剩边框"。
+ *
+ * 所以把绿加在**卡片自己**身上：
+ *   · 卡片底 rgba(--plt-todo,.10)：在组底之上再叠一层，每张卡都带绿调
+ *   · 卡片边 rgba(--plt-todo,.34)：边也染绿，不再是那条刺眼的白边
+ *
+ * 为什么 .10 而不是更高：卡片是承载标题与正文的地方，底色太重会压住文字；
+ * 而且它叠在已经是 .30 的组底上，.10 的叠加已足够让"这块是绿的"成立。
+ * 执行中的卡片不另设外观：它和普通待办卡片长得一样（id=4-A）。
+ *
+ * ── id=Vrfpg7-A：卡片与绿底「糊在一起」，改用中性底 + 绿边框 ──────────
+ *
+ * 实测（深色主题，面板 rgb(22,24,28)）：
+ *   组容器 α=.30 → rgb(29,65,40)
+ *   卡片   α=.10 → rgb(31,75,43)    ← 只比容器深 10
+ *
+ * 问题不在"绿得不够"，在**方向**：卡片和容器都是「绿叠绿」，同色调、同方向，
+ * 叠出来的差只有 10，肉眼分不出边界。继续加 α 只会让整块更绿、边界更糊。
+ *
+ * 改法：让卡片**退出绿色系**，用中性色（与面板同源），
+ * 把绿色全部让给**边框**去表达。这样：
+ *   · 卡片是"淡墨块"，从绿容器里浮出来 —— 靠明度方向差区分，不再同向叠加
+ *   · 绿色仍然是待执行组的识别色，只是集中在描边与组头
+ *   · 复用的是宿主那套 --dsw-alias-bg-tertiary（中性底），不新造色值
+ *
+ * ⚠ 这里**不能用 --plt-accent**：`.plt-group-todo{--plt-accent:var(--plt-todo)}`
+ *   把它在这个作用域里重定义成了绿色，用它等于还是绿叠绿 —— 白改。
+ *   （第一版就这么写的，靠 build 后的产物核对才发现。）
+ *
+ * 数值（实测标定，深色主题面板 rgb(22,24,28)、组容器 rgb(29,65,40)）：
+ *
+ *   中性白 α=.035 → rgb(37,72,48)  差  8   ← 太弱，比改前的 10 还糊
+ *   中性白 α=.08  → rgb(47,80,57)  差 18   ← **采用**
+ *   中性白 α=.15  → rgb(63,94,72)  差 34   ← 偏亮，像悬停态
+ *
+ * 教训：换成中性色本身不解决问题，**必须同时把明度差拉开**。
+ * 第一版只把绿底换成「中性 .035」，方向虽然反了，但差只有 8 —— 白改。
+ *
+ * 边 α=.42（绿边要能顶住 .30 的绿底，太细会被吃掉）。
+ *
+ * ── id=Vrfpg7-B：透明度对齐「带审核」（值 .08/.42 → .04/.18）──────────
+ * 只调透明度，**底色仍然是中性白**（Vrfpg7-A 的结论：绿叠绿看不出边界）。
+ * 「带审核」的卡片是 rgba(--plt-accent,.04) + 边 .18，这里换成同值的白 + 绿边：
+ * 两组卡片在各自底色上的浓度一致，区别只剩色相。
+ *
+ * ── id=Vrfpg7-C：去掉「内部实底色」，只留一点轻微内阴影 ────────────────
+ *
+ * 题面说的「内部实底色」，实际不是 background —— `.plt-group-body` 本来就没有
+ * 背景色。它来自卡片**继承自通用规则**的 box-shadow：
+ *
+ *   .plt-group-body .plt-item{
+ *     box-shadow: inset 0 0 0 1px  rgba(accent,.05),
+ *                 inset 0 0 20px -10px rgba(accent,.55)   ← 元凶
+ *   }
+ *
+ * 那条 20px 内发光在灰底上只是一层柔光，但在**绿底**上会摊成一块灰白，
+ * 看起来就是"卡片内部有实底填充"。待执行组覆盖了 background 与 border-color，
+ * 唯独没覆盖 box-shadow，于是这条原封不动地继承了下来。
+ *
+ * 处理：显式覆盖，只留 1px 的极淡内描边（α=.05），去掉 20px 内发光。
+ *   强度刻意压得很低 —— 题面要求"不能变成明显的深色块"。
+ *   颜色换回绿色系（--plt-todo 的 .05），与整组色调一致。 */
+.plt-group-todo .plt-item{
+  /* 中性高亮底：比绿容器亮一档，卡片像"浮在上面的一张纸"。
+     用白色叠加而不是任何 --plt-* 变量 —— --plt-accent 在本作用域被重定义成绿色，
+     --plt-todo* 全是绿，只有裸白是真正中性的。 */
+  background:rgba(255,255,255,.04);
+  /* 绿边框保留分组识别（透明度与带审核的 .18 对齐） */
+  border-color:rgba(var(--plt-todo,46,160,67),.18);
+  /* id=Vrfpg7-C：只保留一丝内描边，去掉 20px 内发光那块"实底"。 */
+  box-shadow:inset 0 0 0 1px rgba(var(--plt-todo,46,160,67),.05);
+}
+/* 卡片悬停：id=Vrfpg7-A —— 跟着改中性底，否则一悬停又变回绿底，
+   「静态中性、悬停变绿」会让卡片看起来像被选中了。
+   id=Vrfpg7-B：透明度同样对齐带审核（悬停值按 .04→.08 等比，边框 .18→.3）。 */
+.plt-group-todo .plt-item:hover{
+  background:rgba(255,255,255,.08);
+  border-color:rgba(var(--plt-todo,46,160,67),.3);
+}
+/* 编号：卡片有了绿底之后，原来的 caption 灰（#8a8a8a + opacity .85）
+ * 在绿底上只有 2.90:1 —— 读不清。
+ *
+ * 如实记录：它在**改前就已经偏低**（3.93:1），只是卡片是近灰底时不明显；
+ * 加绿底把这个既有问题放大到了不可接受。这里一并修掉。
+ *
+ * 用中性亮灰 #c8c8c8（5.98:1）而不是 --plt-todo-fg：
+ * 编号是元信息（`#aB3xK9`），不该跟组色抢眼；中性灰在绿底上照样清楚，
+ * 也让"彩色的是状态、灰色的是元信息"这条区分继续成立。
+ * opacity 提回 1 —— 半透明叠在有色底上会进一步吃掉对比度。 */
+.plt-group-todo .plt-id{
+  color:#c8c8c8;
+  opacity:1;
+}
+/* id=239：组收起、但组里还有条目在跑 —— 卡片整个不在 DOM 里（收起时只渲染组头），
+   上面那条卡片流光自然也跟着消失。这里让容器自己的边框走一道光，收起也能看见「还在干」。
+   挂在 .plt-group 而不是 .plt-group-h：组头有 backdrop-filter 与 z-index:3 自成层叠上下文，
+   光往外扩会被裁掉，而且会跟 hover 的 ::before 左竖条抢伪元素。
+   边框流光用 padding + mask 挖空中间，只留 1px 环，避免在容器里铺一层色块压住内容。 */
+@keyframes plt-group-sheen{0%{background-position:200% 0}100%{background-position:-60% 0}}
+/* 减弱动画时不留一条乱跑的亮边：换成稳态描边，仍在告诉用户「这组在干活」。 */
+@media (prefers-reduced-motion: reduce){}
+/* id=Vrfpg7-B：计数透明度对齐带审核（.14/.3 → .16/.28）。 */
+.plt-group-todo .plt-group-count{background:rgba(var(--plt-todo,46,160,67),.16);color:rgb(var(--plt-todo-fg,187,247,208));border-color:rgba(var(--plt-todo,46,160,67),.28)}
+/* id=240：组收起时的「正在执行」提示。跟计数胶囊并排，但形状是纯文字 + 转圈，
+   比胶囊更轻 —— 它说的是「还在动」，不是「有几条」。
+   字号比 .plt-group-count 小 0.5px（与计数胶囊同款递减），两个控件并排时不抢。
+   flex:0 0 auto + nowrap：组头高度固定 38px，提示绝不能被压成两行。
+   max-width 与 ellipsis 是兜底：320px 侧栏下如果真放不下，宁可截断也不要挤掉组名。 */
+.plt-group-run{flex:0 0 auto;display:inline-flex;align-items:center;gap:4px;max-width:92px;overflow:hidden;font-size:12px;line-height:18px;font-weight:500;letter-spacing:.01em;white-space:nowrap;text-overflow:ellipsis;color:rgba(var(--plt-accent,140,140,140),.95)}
+/* 深数组的 accent 里有红(240,82,82)与琥珀(255,180,60)，直接当 12px 小字用只有 3.1~4.4:1，
+   在深底上偏暗。往白里调 55% 保住色相、把亮度提上来；浅色那条覆盖会把它整条压回深色值。
+   （id=78-B：原文写的是「绿」，待执行改红后已同步。） */
+@supports (color: color-mix(in srgb, red 50%, white)){
+  .plt-group-run{color:color-mix(in srgb,rgb(var(--plt-accent,140,140,140)) 55%,#ffffff)}
+}
+.plt-group-run svg{flex:0 0 auto}
+.plt-group-run-txt{overflow:hidden;text-overflow:ellipsis}
+/* id=377：「完成后暂停」开关（组头左侧、紧跟组名）。只在「干活中」渲染。
+   视觉语言直接借用顶栏那颗「自动刷新」（.plt-auto）：小圆点亮起 = 开、灰点 = 关，
+   胶囊描边同款。不新造 toggle 皮肤 —— 同一个侧栏里出现两种开关长相，
+   用户还得先分辨「这两个是不是一回事」。
+   与 .plt-auto 的区别只有两处，都是组头特有的：
+   1. 不写 min-width —— .plt-auto 固定 62px 是为了让「自动刷新 / 已暂停」换字时
+      顶栏不跳；这里的两种文案（5 字 / 4 字）相差 1 个字，给个 min-width 反而
+      让它在窄屏里多占地，组头比顶栏更挤。
+   2. flex:0 0 auto + nowrap —— 组头高度固定 38px，绝不能被压成两行。
+   颜色跟着本组的 --plt-accent 走（与 .plt-group-run 一致），
+   这样待执行组是粉调、别的组是蓝调，开关不会突然变成另一种主色。 */
+/* ── 「完成后暂停」开关（id=76-B 重写）─────────────────────────────────────
+ *
+ * 尺寸对齐同区域的两个邻居，不再是"自己一套"：
+ *   · .plt-group-count  12.5px / line-height 18px / padding 0 7px / radius 999px
+ *   · .plt-group-run    12px   / line-height 18px
+ * 本开关取 12px / 18px / padding 0 8px —— 与 run 同字号、与 count 同高度。
+ * 三者并排在同一行，**line-height 统一 18px 是关键**：原来本开关是 16px，
+ * 比邻居矮 2px，组头里那一排基线看着就发飘。
+ *
+ * ── 为什么高度用 line-height 而不是 height ─────────────────────────────────
+ * 不写死 height：字体会被宿主主题放大，写死会截断文字。
+ * 用 `line-height:18px` + `padding:0 8px` 让高度由行高自然决定，
+ * 与 .plt-group-count 的做法完全一致。
+ *
+ * ── 配色一律走变量（本步硬要求）───────────────────────────────────────────
+ * 默认态：宿主主题的 caption 文字 + secondary 边框（与别的次级控件一致）。
+ * 强调态：本组 --plt-accent（已按红色主题变量解析）。
+ * 圆点亮起：**--plt-todo 而不是硬编码绿** —— 原来写死 #4caf50，
+ * 待执行组改成红色主题后就成了"组头红、灯是绿的"，本步修掉。
+ * 没有任何 #hex / rgba(数字) 字面量。
+ * ────────────────────────────────────────────────────────────────────────── */
+/* id=6Gs9v1-B：**「完成后暂停」开关复用 `.plt-btn`**。
+ *
+ * 它原先自带一整套尺寸（height:18px / padding:0 8px / border-radius:999px /
+ * font-size:12px），那套是给**组头**设计的（与 .plt-group-count 同排的 18px 基线）。
+ * 6Gs9v1-A 把它搬到顶栏后，只能再补一条 `.plt-top` 覆盖去追平邻居 ——
+ * 等于同一颗按钮身上有两套尺寸规则，任一方改动都会让它们走散。
+ *
+ * 现在改成：**尺寸与形状全部交给 `.plt-btn`**（与「开始/暂停」同一份），
+ * 这里只保留这个开关**独有**的东西：
+ *   · 胶囊圆角（顶栏里其它按钮是 6px 方角，开关沿用它原来的 999px 会突兀，
+ *     所以这里主动对齐成 6px —— 见下面 border-radius:inherit）
+ *   · 小圆点（开关状态指示）
+ *   · on 态 / hover / disabled 的配色
+ *
+ * 因此下面**只声明它独有的东西**：状态色、状态点的间距、过渡。
+ * 尺寸/排版/gap/flex/min-width 全部来自 01-base.css 那条
+ * `.plt-start,.plt-pause,.plt-auto-pause{...}` —— 与开始/暂停按钮同一份。 */
+.plt-auto-pause{
+  /* id=6Gs9v1-B：display / align-items / justify-content / gap / flex /
+   * min-width / padding / font-size / line-height / font-weight 一律不再写，
+   * 全部交给那条共享规则。这里只留它作为「开关」区别于「动作按钮」的部分。 */
+  font-variant-numeric:tabular-nums;
+  color:var(--dsw-alias-label-caption,#9a9a9a);
+  transition:color .12s ease,border-color .12s ease,background .12s ease,box-shadow .12s ease;
+}
+/* id=6Gs9v1-B：**原先那条 `.plt-top .plt-auto-pause` 尺寸覆盖已删除**。
+ * 它存在的唯一理由是「把组头那套 18px 追平到顶栏」，现在尺寸直接由
+ * `.plt-btn` 提供，不再需要任何补偿规则。
+ *
+ * 小圆点保留 8px：7px 在 14px 文字旁边像颗灰尘 —— 这是**圆点自己的尺寸**，
+ * 不属于按钮盒模型，所以不受「复用 .plt-btn」影响，也没必要跟着改。 */
+.plt-auto-pause .plt-dot{
+  width:8px;
+  height:8px;
+  height:7px;
+  border-radius:50%;
+  background:var(--dsw-alias-label-caption,#8a8a8a);
+  flex:0 0 auto;
+  transition:background .12s ease,box-shadow .12s ease;
+}
+
+/* hover：三种方式同时给"能点"的信号（边框、文字、极淡底色），
+   但**不换底色的色相** —— 历史问题（蓝底改白字、黄底压黄字）都源于
+   "只改了一半"：底色与文字色各自变，撞在一起就不可读。
+   这里底色统一用 accent 的低透明度，文字统一用 accent 全值，两者同源同相，
+   对比度天然够，不会出现撞色。 */
+.plt-auto-pause:hover{
+  border-color:rgba(var(--plt-accent,140,140,140),.45);
+  background:rgba(var(--plt-accent,140,140,140),.08);
+  color:rgba(var(--plt-accent,140,140,140),.95);
+}
+
+/* active：按下态。
+   底色透明度**不能太高** —— 实测 α=.16 时文字对该底只有 4.25:1（低于 4.5 门槛），
+   因为同源的 accent 文字压在同源 accent 底上，底越实对比越低。
+   α=.1 时 4.59:1 达标，再用"更实的描边 + 全值文字"表达按下感。 */
+.plt-auto-pause:active{
+  border-color:rgba(var(--plt-accent,140,140,140),.75);
+  background:rgba(var(--plt-accent,140,140,140),.1);
+  color:rgba(var(--plt-accent,140,140,140),1);
+}
+
+/* focus-visible：键盘聚焦才显示，鼠标点击不出现（避免"点完留一圈"）。
+   用 outline + offset 而不是 box-shadow：后者会被圆角裁掉一半。 */
+.plt-auto-pause:focus-visible{
+  outline:2px solid rgba(var(--plt-accent,140,140,140),.72);
+  outline-offset:2px;
+}
+
+/* ── 开关两态的视觉区分（id=76-C）──────────────────────────────────────────
+ *
+ * 关（默认，见上面的基础规则）：**空心**胶囊 —— 透明底 + 次级灰描边 + 灰字 + 灰点。
+ * 开（.on）：**实心**胶囊 —— accent 淡底 + accent 描边 + accent 字 + 亮色圆点。
+ *
+ * 为什么要"空心 vs 实心"这层差异，而不是只改颜色：
+ *   1. 只靠颜色区分，在**低饱和主题或色弱**下会很弱（灰字 ↔ 红字，明度接近）；
+ *   2. 关态用透明底、开态用填充底，这是「填充=激活」的通用开关语义，
+ *      不依赖色相就能读出来；
+ *   3. 它同时提供了"勾选标识"的等价物 —— 那个圆点从灰变亮、并加一圈光晕，
+ *      就是这颗开关的"选中记号"（项目里顶栏「自动刷新」用同一套语言）。
+ *
+ * 尺寸零变化：两态的字号/行高/内边距/圆角/边框宽度全部相同，
+ * **只有颜色与底色变**。所以切换时按钮不会撑大或缩小，同一行里的
+ * 「组名 · 开关 · 条数」也不会跟着位移。
+ * 边框宽度两态都是 1px（不改成 2px 来强调）—— 加粗边框会让 content box
+ * 缩小 1px，文字看起来就会"跳"一下。
+ * ────────────────────────────────────────────────────────────────────────── */
+/* id=wZIKdd：开态由「跟随本组 accent（绿）」改为**黄色**。
+ *
+ * 为什么用 --plt-run 而不是新造一个变量：这颗按钮的动作是「跑完就停下来」，
+ * 与「执行中」是同一件事的两面（一个是正在跑，一个是准备停），
+ * 共用一套黄最自然；也让"黄 = 与运行相关的状态"成为一条可记的规则。
+ *
+ * 注意这里**不再用 --plt-accent**：待执行组的 accent 已经是绿色，
+ * 开态的绿与按钮本身的灰底几乎分不出"开没开"（这正是改色的直接原因）。
+ */
+.plt-auto-pause.on{
+  color:rgba(var(--plt-run,255,214,10),1);
+  border-color:rgba(var(--plt-run,255,214,10),.5);
+  background:rgba(var(--plt-run,255,214,10),.1);
+}
+.plt-auto-pause.on .plt-dot{
+  background:rgb(var(--plt-run,255,214,10));
+  box-shadow:0 0 0 2px rgba(var(--plt-run,255,214,10),.22);
+}
+
+/* ── 禁用态（id=76-C）──────────────────────────────────────────────────────
+ *
+ * 目前这颗按钮在正常流程里不会被禁用（组头只在有任务跑时渲染它），
+ * 但补上是必要的：
+ *   1. 将来若加"请求飞行中禁止切换"之类的约束，样式已经就位，不会临时裸奔；
+ *   2. 更要紧的是 —— **没有 :disabled 规则时，浏览器仍会应用 :hover 样式**。
+ *      一旦真的禁用，用户悬停上去会看到"亮起来但点不动"，那是明确的错误反馈。
+ *
+ * 数值取项目惯例：opacity .45 + cursor default（与 .plt-copy-btn 一致）。
+ * 同时显式把 hover / active 的强调色重置回关态的灰，
+ * 这样禁用的**开启态**按钮悬停时也不会突然亮成 accent。
+ *
+ * 注意：这里重置的是颜色，**不动尺寸** —— 禁用不改高度/内边距，
+ * 否则置灰的一瞬间按钮会缩小，那一排又跳一次。
+ * ────────────────────────────────────────────────────────────────────────── */
+.plt-auto-pause:disabled{
+  opacity:.45;
+  cursor:default;
+}
+/* 禁用时无论开关处于哪一态、是否悬停，都退回"灰、空心、无底色"。 */
+.plt-auto-pause:disabled,
+.plt-auto-pause:disabled:hover,
+.plt-auto-pause:disabled:active,
+.plt-auto-pause.on:disabled,
+.plt-auto-pause.on:disabled:hover{
+  background:transparent;
+  border-color:var(--dsw-alias-border-secondary,rgba(255,255,255,.16));
+  color:var(--dsw-alias-label-caption,#9a9a9a);
+  outline:none;
+}
+/* 禁用态那颗圆点也压回灰 —— 否则"灯还亮着"会让人以为开关仍是开的。 */
+.plt-auto-pause:disabled .plt-dot,
+.plt-auto-pause.on:disabled .plt-dot{
+  background:var(--dsw-alias-label-tertiary,#8a8a8a);
+  box-shadow:none;
+}
+/* 开启态 + hover：在 on 的基础上再亮一点，仍然同源同相（id=wZIKdd 起改为黄）。 */
+.plt-auto-pause.on:hover{
+  border-color:rgba(var(--plt-run,255,214,10),.68);
+  background:rgba(var(--plt-run,255,214,10),.18);
+  color:rgba(var(--plt-run,255,214,10),1);
+}
+/* 窄屏（id=6Gs9v1-B/C 修订）。
+ *
+ * 原来这里写的是 `@container (max-width:360px){.plt-auto-pause{padding:0 6px}...}`，
+ * 那套是「组头小胶囊」时期的取舍（360px 就收字）。但搬家 + 并入共享规则之后：
+ *   · padding 已由 .plt-start,.plt-pause,.plt-auto-pause 统一给，
+ *     这里再写一次 `0 6px` 会把共享规则覆盖掉，两者又走散；
+ *   · 断点也要跟邻居对齐 —— .plt-start/.plt-pause 是 **300px** 才收字，
+ *     开关若在 360px 就收，会先于邻居变成孤零零一个圆点。
+ *
+ * 所以这里只保留「收字」这一个动作，断点与邻居统一到 300px。 */
+@container (max-width:300px){.plt-auto-pause-txt{display:none}}
+/* 组头本来就窄：320px 以下把「正在执行」缩成只有转圈，靠 title/aria-label 说明。
+   必须用 @container —— @media 量的是视口，侧栏拖窄时窗口还是宽的。 */
+@container (max-width:360px){.plt-group-run{max-width:20px;gap:0}.plt-group-run-txt{display:none}}
+
+/* —— 二级内容统一：同一套内边距、分隔线、标题与代码块基调 —— */
+.plt-group-body .plt-body{padding:6px 12px 13px 22px;margin-top:4px;border-top:1px solid rgba(var(--plt-accent,140,140,140),.14)}
+.plt-group-body .plt-sec{margin-top:13px}
+.plt-group-body .plt-sec-h{font-size:13px;letter-spacing:.05em;color:rgba(var(--plt-accent,140,140,140),.9);font-weight:600;margin-bottom:7px;text-transform:none}
+/* 「计划」标题右侧的复制按钮组：平时低调，hover 才亮起来。 */
+.plt-copy{margin-left:auto;display:inline-flex;align-items:center;gap:6px 8px;flex:0 1 auto;flex-wrap:wrap;justify-content:flex-end}
+/* 「计划」标题右侧的小胶囊：字号 11→12、内边距 1px 6px→3px 9px、图标与文字间距 3→5px，
+   三个按钮之间 5→8px。原来的尺寸贴着标题基线，点起来也太窄。 */
+.plt-copy-btn{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;border:1px solid rgba(var(--plt-accent,140,140,140),.28);background:transparent;color:rgba(var(--plt-accent,140,140,140),.85);font-size:12px;line-height:16px;font-weight:500;letter-spacing:0;cursor:pointer;white-space:nowrap;transition:background .15s ease,border-color .15s ease,color .15s ease}
+.plt-copy-btn:hover{background:rgba(var(--plt-accent,140,140,140),.14);border-color:rgba(var(--plt-accent,140,140,140),.55);color:#fff}
+.plt-copy-btn:active{transform:translateY(.5px)}
+.plt-copy-btn.done{background:rgba(76,175,80,.18);border-color:rgba(76,175,80,.55);color:#bfe6c1}
+/* 禁用态：原来只有底部审批按钮的 disabled 规则管着，搬进标题行后必须补上，
+ * 否则待审核条目在 busy（正在提交）时这个「通过」还看着能点。 */
+.plt-copy-btn:disabled{opacity:.45;cursor:default}
+.plt-copy-btn:disabled:hover{background:transparent;border-color:rgba(var(--plt-accent,140,140,140),.28);color:rgba(var(--plt-accent,140,140,140),.85)}
+.plt-group-body .plt-plan{background:rgba(var(--plt-accent,140,140,140),.05);border:1px solid rgba(var(--plt-accent,140,140,140),.1);border-radius:6px;padding:10px 12px;max-height:260px}
+.plt-group-body .plt-note{background:rgba(var(--plt-accent,140,140,140),.035);border-left:2px solid rgba(var(--plt-accent,140,140,140),.45);border-radius:0 6px 6px 0;padding:9px 11px;max-height:220px}
+.plt-group-body .plt-meta{color:var(--dsw-alias-label-caption,#9a9a9a);gap:5px 12px;margin-top:12px}
+.plt-group-body .plt-checks{gap:12px;margin-top:12px}
+.plt-group-body .plt-del{color:#d46a6a;border-color:rgba(212,106,106,.35)}
+.plt-group-body .plt-plan::-webkit-scrollbar,.plt-group-body .plt-note::-webkit-scrollbar{width:6px}
+.plt-group-body .plt-plan::-webkit-scrollbar-thumb,.plt-group-body .plt-note::-webkit-scrollbar-thumb{background:rgba(var(--plt-accent,140,140,140),.3);border-radius:3px}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【9】条目详情区
+ * 源：20-css/15-detail.js（61 条规则｜1 个 @keyframes｜2 条 animation）
+ * 编号与标题、状态/类型标签、正文（.plt-plan）与备注（.plt-note）、
+ * 元信息、勾选区、通过按钮。
+ * ⚠ 动画：plt-spin（执行中转圈）
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* 标题永远单行：长标题用省略号收尾，绝不换行 —— 一旦换行，条目会被撑成两三层高，
+   右侧的状态胶囊还会被挤到下一行去。右边留 5px，让省略号和状态胶囊之间透一口气。 */
+.plt-id{flex:0 0 auto;font-size:12.5px;line-height:1.32;color:var(--dsw-alias-label-caption,#8a8a8a);font-variant-numeric:tabular-nums;opacity:.85}
+/* id=179：待审核标题右侧的耗时。字号比标题小一档（14.5→11.5）、字重降到 400、
+   颜色用 caption 灰，和 .plt-name 的 600 字重主色拉开；.plt-name 是 flex:1 1 auto，
+   所以这个节点固定落在标签左侧成一列，多行的耗时会竖向对齐，比贴着标题文字
+    ragged 排更好扫。margin-left 收掉 .plt-head 的 8px gap 一部分（标题自带
+   padding-right:5px，不然后距有 13px，看着像两个不相干的东西）。 */
+.plt-dur{flex:0 0 auto;margin-left:-4px;font-size:11.5px;line-height:1.4;font-weight:400;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-caption,#8a8a8a);opacity:.9}
+/* id=383：没有记录耗时时的兜底占位（「—」）。
+   为什么要它而不是直接不渲染：待审核组里子任务逐条排下来，
+   缺失的那一行少一截，纵向扫视时右端参差、看起来像渲染坏了。
+   占位用同一字号同一行高（不额外改尺寸），只把不透明度再压一档 ——
+   它是「没有数据」，不该和真实耗时抢注意力。
+   同时给 min-width：一个「—」比「3分钟47秒」窄得多，不撑开的话
+   这一列照样对不齐。取 3.2em 约等于「12分钟34秒」的宽度，
+   够覆盖常见耗时；极端长耗时仍会自然撑开，不会截断。 */
+.plt-dur.is-empty{min-width:3.2em;text-align:center;opacity:.45}
+.plt-name{flex:1 1 auto;min-width:0;overflow:hidden;font-size:14.5px;letter-spacing:.005em;line-height:1.3;white-space:nowrap;text-overflow:ellipsis;padding-right:5px}
+.plt-tag{flex:0 0 auto;font-size:14px;padding:0 7px;border-radius:999px;line-height:20px;border:1px solid transparent;white-space:nowrap}
+/* id=233「已中断」：**紫色**告警色，和执行中的黄色明确分开。
+   mBSaIn：执行中由红改黄之后，这条原来是琥珀（255,180,60）——
+   两者 RGB 距离只有 60，并置几乎分不出（原来是红 vs 琥珀，距离 94 还凑合）。
+   两个状态都发生在「还没完成」的条目上，靠深浅区分一定会看错，所以必须换色相。
+   选紫：与黄（执行中）、绿（待执行）、红（失败）在色相上四分天下，
+   语义上也对 —— 「中断」是冷静的、已经停下的，不该用"警示的暖色"。
+   不带转圈图标：它没有在跑，不能再假装活着。 */
+.plt-tag.interrupted{background:rgba(183,148,246,.16);color:#b794f6;border-color:rgba(183,148,246,.44)}
+/* 执行失败：模型已跳过。留在待执行组里，颜色和「执行中」分开，避免看起来还在跑。 */
+.plt-tag.failed{background:rgba(220,80,70,.16);color:#f0a8a2;border-color:rgba(220,80,70,.42)}
+/* 执行中：转圈图标匀速旋转，作为「还在跑」的活信号（减少动态偏好下停转）。 */
+/* 执行中徽标只放一个转圈（id=352-D）：外框固定 26×20，与文字徽标的行高对齐，
+   所以这一条从文字变图标时整列右边界不会移动。颜色继承 .plt-tag 的 color，
+   深浅主题各自由 30-light.js 的既有规则决定，这里不再写第二套颜色。 */
+.plt-tag.plt-run-only{width:26px;height:20px;padding:0;justify-content:center;box-sizing:border-box}
+/* 空文字节点会撑出 1px 的基线空隙，转圈本身不占文字宽度，压掉。 */
+.plt-tag.plt-run-only > span{display:none}
+.plt-spin{animation:plt-spin .9s linear infinite;transform-origin:50% 50%}
+@keyframes plt-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.plt-spin{animation:none}}
+/* id=407：待执行的空心圆点状态标记**已移除**（题面：这个设计方式不要了）。
+   原来这里有一整套：20×20 透明外壳 + 7px 空心圈 + 悬停提亮 + 触屏放大，
+   以及「为什么不叫 plt-dot」的重名说明。
+   移除的理由：待执行组的身份已经由组色（绿）表达，再挂一个中性灰圆点属于重复表达；
+   而且它是三组里唯一还画状态标记的，与待审核/已审核「组名即状态」不一致。
+   现在待执行的状态位与另两组一样：不画任何东西。 */
+.plt-tag.type{background:transparent;color:var(--dsw-alias-label-caption,#9a9a9a);border-color:var(--dsw-alias-border-secondary,rgba(255,255,255,.14))}
+/* 置顶按钮：平时淡到几乎看不见，鼠标移到这一行才亮起来，不抢标题的宽度。 */
+/* id=320：槽位恒定占 20px（与按钮同宽），按钮在槽位里居中。
+   为什么要有槽位：拆分批次行永远没有置顶按钮（见 50-item.js 的 pinTop 判定），
+   没有槽位时它们的状态标签会比普通行右移 20px，纵向扫视时那一列是锯齿。
+   槽位空着也不收窄 —— 收窄就回到锯齿。 */
+.plt-pin-slot{flex:0 0 20px;display:inline-flex;align-items:center;justify-content:center;height:20px}
+.plt-pin{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--dsw-alias-label-caption,#8a8a8a);opacity:0;cursor:pointer;transition:opacity .14s ease,background .14s ease,border-color .14s ease,color .14s ease}
+.plt-head:hover .plt-pin,.plt-pin:focus-visible{opacity:1}
+.plt-pin:hover{background:rgba(var(--plt-accent,140,140,140),.18);border-color:rgba(var(--plt-accent,140,140,140),.5);color:rgba(var(--plt-accent,140,140,140),1)}
+.plt-pin:active{transform:translateY(.5px)}
+/* 类型只用图标：去掉左右多余留白，跟输入栏胶囊里的图标一致。 */
+.plt-tag.type{display:inline-flex;align-items:center;justify-content:center;padding:0 5px;line-height:18px}
+.plt-tag.type svg{display:block}
+/* id=358：「已审核」的徽标样式已随节点一起删除 —— 已审核组里每条都必然已审核，
+   分组位置已经把状态说清楚，右端再挂一个最长的词只会挤标题。
+   id=368：「待审核」同理，一起删。两条分支现在都返回 null（见 50-item.js 的
+   status.key 判断），这里若还留着规则就是死样式 —— 而 dead-css.mjs 抓不到它
+   （它只认 .plt- 前缀，.plt-tag.unreviewed 会被记成 plt-tag），
+   所以必须手动删，不能指望脚本报错。
+   仍然保留的 .plt-tag.*：todo / failed / interrupted ——
+   这几种状态在组内不一致（同组里各条状态不同），徽标才有信息量。
+   id=405：draft 已从这份名单移除 —— 草稿组整体删除，不再有草稿状态徽标。 */
+.plt-body{padding:2px 12px 12px 28px;border-top:1px solid var(--dsw-alias-border-secondary,rgba(255,255,255,.07))}
+.plt-sec{margin-top:9px}
+.plt-sec-h{font-size:14px;letter-spacing:.03em;color:var(--dsw-alias-label-caption,#8a8a8a);margin-bottom:4px;font-weight:600;display:flex;align-items:center;gap:8px}
+/* id=395：「计划」这一排右侧的时间戳（模式 / 创建 / 开始 / 耗时）。
+   从原来独占一行的 .plt-meta 搬进来，所以这里要把「附注」的身份表达清楚，
+   否则它会和同级标题「计划」抢眼：
+   1. 字号 12.5px（.plt-sec-h 是 14px）—— 小一级就足以拉开层次，
+      不必靠加粗或换色系；
+   2. 字重 400（标题是 600）—— 细一档，扫视时先看到「计划」再看读数；
+   3. 颜色用 caption（与标题同一个 token）。**故意不再更淡**：
+      时间戳是拿来读的具体值，压到看不清就失去意义了；
+      层次靠字号与字重拉开，不靠继续降低对比度；
+   4. margin-left:auto 贴着行尾，与复制按钮之间由 .plt-sec-h 的 gap 保证间距。
+      为什么它在 .plt-copy 之后还自己 margin-left:auto：.plt-copy 本身也是
+      margin-left:auto，两个都设时靠前者把这一组推到右侧、后者在组内再推，
+      于是顺序稳定为「计划 …… [复制…] [创建…]」，不会因某个按钮不存在而错位。
+   5. min-width:0 + nowrap + 省略号：窄侧栏下宁可截掉最末尾的「耗时」，
+      也不能让它把整行挤成两行（.plt-sec-h 不换行）。 */
+.plt-sec-meta{flex:0 1 auto;min-width:0;margin-left:auto;display:inline-flex;align-items:center;gap:10px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:12.5px;line-height:1.5;font-weight:400;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-caption,#8a8a8a)}
+/* 每个读数片段自身也不许换行 —— 否则「创建：2026/10/30 12:34」会在中间断开。 */
+.plt-sec-meta > span{flex:0 0 auto;white-space:nowrap}
+/* id=405：草稿就地编辑框（编辑框 / 模式胶囊 / 保存状态 / 操作区）已随草稿模式删除，
+   它下面原本还有 4 条描述子部件的注释（含一条未闭合的多行注释），一并清掉。
+   注意那块里第一条注释是以单个块注释开头符起笔、却没写收尾符的，
+   会吞掉后续内容直到遇到下一个块注释收尾符 —— 删掉它们顺带修掉了一处注释错位。
+   （本条注释里刻意不把块注释的开/收符号写出来：写出来就会嵌套，反而制造同样的错位。） */
+.plt-plan{white-space:pre-wrap;word-break:break-word;line-height:1.6;font-size:14px;max-height:300px;overflow:auto;background:var(--dsw-alias-bg-tertiary,rgba(0,0,0,.18));border-radius:6px;padding:8px 10px}
+.plt-note{white-space:pre-wrap;word-break:break-word;line-height:1.6;font-size:14px;max-height:240px;overflow:auto;border-left:2px solid var(--dsw-alias-border-accent,rgba(80,140,255,.5));padding-left:8px}
+/* 原始提示词：比备注更「档案」一点，用中性虚线框而不是左侧强调条，视觉上让它是旁证而不是结论。 */
+.plt-source{white-space:pre-wrap;word-break:break-word;line-height:1.6;font-size:13px;max-height:200px;overflow:auto;color:var(--dsw-alias-label-secondary,inherit);background:rgba(127,127,127,.05);border:1px dashed var(--dsw-alias-border-l3,rgba(127,127,127,.3));border-radius:6px;padding:8px 10px}
+/* 折叠标题：整行都是点击区（原文默认收起，卡片不至于被一段需求撑长）。
+   图标在右侧，展开时转 90°，跟分组头、条目头的箭头保持同一套语言。 */
+.plt-sec-toggle{display:flex;align-items:center;gap:8px;width:100%;margin:0 0 4px;padding:2px 0;background:none;border:0;cursor:pointer;text-align:left;color:inherit;font:inherit}
+.plt-sec-toggle:hover .plt-sec-h{color:var(--dsw-alias-label-primary,#e8e8e8)}
+.plt-sec-toggle .plt-sec-h{margin-bottom:0;flex:1 1 auto;min-width:0}
+.plt-sec-toggle .plt-sec-caret{margin-left:auto;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:12px;transition:transform .16s ease;color:var(--dsw-alias-label-caption,#8a8a8a)}
+.plt-sec-toggle.open .plt-sec-caret{transform:rotate(90deg)}
+.plt-sec-hint{font-weight:400;font-size:12px;letter-spacing:0;color:var(--dsw-alias-label-caption,#8a8a8a)}
+.plt-meta{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:9px;color:var(--dsw-alias-label-caption,#9a9a9a);font-size:14px}
+.plt-checks{display:flex;gap:16px;align-items:center;margin-top:10px;flex-wrap:wrap}
+/* 条目底部右侧的动作组（id=405：草稿相关的两颗已删，现在只剩删除）。 */
+.plt-checks .plt-actions{display:inline-flex;align-items:center;gap:8px;margin-left:auto}
+.plt-check{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;color:var(--dsw-alias-label-secondary,#c8c8c8)}
+.plt-check input{cursor:pointer;accent-color:var(--dsw-alias-bg-accent,#2f6fd0);width:15px;height:15px}
+.plt-check.locked{cursor:default;opacity:.62}
+.plt-check.locked input{cursor:not-allowed}
+.plt-check.locked span::after{content:' · 模型回填';font-size:14px;opacity:.65}
+/* 图标按钮（id=353）：36×26 的固定热区，与相邻按钮同高（.plt-btn 的 20px 行高 +
+   3px 上下内边距 = 26px），所以加进 .plt-actions 不会把这一排顶到第二行。
+   宽度写死而不是靠 padding 撑 —— 图标宽度一变，热区不该跟着抖。 */
+.plt-icon-btn{display:inline-flex;align-items:center;justify-content:center;width:36px;height:26px;padding:0;border-radius:6px;line-height:1}
+/* 垃圾桶用删除色，与文字「删除」按钮同一套色：两个入口看起来是同一件事。 */
+.plt-icon-btn.plt-trash{color:#d46a6a;border-color:rgba(212,106,106,.35)}
+.plt-icon-btn.plt-trash:hover:not(:disabled){background:rgba(212,106,106,.14);border-color:rgba(212,106,106,.6)}
+/* id=382：待审核操作区里与垃圾桶并排的「通过」图标按钮。
+   一条任务要求「图标风格、尺寸、颜色、hover/禁用态与垃圾桶保持一致」，
+   所以这里**只覆盖颜色这一项** —— 尺寸（36×26）、圆角、热区、触屏放大
+   全部继承上面的 .plt-icon-btn，一行都不重复写。
+   hover 也照垃圾桶的写法复刻（同透明度 .14、边框 .6），只换色相：
+   两颗按钮的响应强度一样，区别只在色相上，扫一眼就知道哪个是「通过」。
+
+   id=392：**改走本组自己的 --plt-accent（待审核是琥珀黄 255,180,60）**，
+   不再写死主色蓝。题面「通过图标保持黄色主题」。
+   为什么用变量而不是再写一个固定黄：--plt-accent 由所在分组决定
+   （14-groups.js 里每组一个，30-light.js 另有浅色档），
+   取它之后这颗图标自动与组头的计数胶囊、执行中提示、「开始干活」
+   同色系 —— 它本来就长在待审核组里，跟着这一组的色走比另立一个黄更稳，
+   日后调组色也不会把它落下。
+   括号里的兜底值取同色，保证变量缺失时仍是黄而不是退回蓝色。
+
+   id=398：**hover 改成「白字 + 黄底」**（题面：hover 时样式是蓝色，要改为白色黄底）。
+   原来是 background: rgba(accent,.14) —— 一层几乎看不见的黄晕，
+   图标本身仍是黄，落在深色卡片上对比度很低，看起来像「没点亮」。
+
+   现在是**反色**：底色铺满整个 accent 黄，图标转成白色。
+   状态差异一眼可见 —— 从「黄描边 + 透明底」变成「实心黄块」。
+
+   **但纯 accent 黄配白字是不可用的**：待审核的 255,180,60 亮度很高，
+   白字压上去只有 **1.77:1**（低于图形元素建议的 3:1），勾几乎糊在底色里。
+   所以黄底上再叠一层固定 26% 的黑 —— 色相不变（仍是黄），
+   但白字对比度提到约 **3.0:1**，勾的形状看得清。
+   为什么用 linear-gradient 叠层而不是写死一个更深的黄色字面量：
+   写死就把 id=392「跟着分组走」的性质丢了 —— 浅色主题的深琥珀 138,95,6
+   会变成另一个色。叠层是在**变量色之上**统一压暗一档，
+   两套主题各自保留自己的黄，只是 hover 时都深一档。
+
+   浅色档（accent = 138,95,6）叠层后白字对比约 7.8:1，更清楚，
+   所以 30-light.js 里不需要再给 hover 写一条覆盖。 */
+.plt-icon-btn.plt-pass-icon{color:rgba(var(--plt-accent,255,180,60),1);border-color:rgba(var(--plt-accent,255,180,60),.42)}
+/* hover：实心黄底 + 白图标。
+   background-color 取 accent 满值，background-image 叠 26% 黑压暗一档 ——
+   两层合起来仍是一个纯色黄块，不会出现渐变或双层边。
+   border-color 用同一个压暗后的观感：取 accent 但透明度 .0 会露出底色边缘，
+   所以这里直接用 accent 满值，让描边与填充融成一块。 */
+.plt-icon-btn.plt-pass-icon:hover:not(:disabled){background-color:rgba(var(--plt-accent,255,180,60),1);background-image:linear-gradient(rgba(0,0,0,.26),rgba(0,0,0,.26));border-color:rgba(var(--plt-accent,255,180,60),1);color:#fff}
+/* 触屏上热区再放大一点（26px 的高度在手指下偏小），不影响桌面布局。 */
+@media (hover:none){.plt-icon-btn{width:40px;height:32px}}
+/* 条目头部右侧的删除图标（id=359 建，id=374 扩到待执行）：复用 .plt-icon-btn + .plt-trash
+   的尺寸与配色，这里只补两件头部特有的约束：
+   1. flex:0 0 auto —— .plt-name 是 flex:1 1 auto，图标不能参与标题的伸缩；
+   2. 头部只有 20px 行高（.plt-btn 的 line-height），而图标按钮是 26px 高，
+      用 align-self:center 让它以标题行中线为基准居中，不把整行撑高 6px。
+      高度仍用 26px：与底部那排按钮保持同一块可点面积，鼠标不必重新校准。
+   id=374 补第 3 条：它曾要跟头部那颗「通过」主按钮并排，两者高度必须齐。
+   id=382 起头部那颗已移除（「通过」改到底部操作区、做成图标），
+   所以「与主按钮齐平」这条约束不再适用 —— 现在它与相邻的通过图标同高同宽。
+   所以这里**不再额外改高度**：一改就把上面第 2 条的取舍推翻，
+   底部那排的 26px 也会失去参照。 */
+.plt-head-del{flex:0 0 auto;align-self:center;margin-left:2px}
+/* id=405：条目头部那颗「转为草稿」按钮已随草稿模式删除，
+   它下面原本有 12 行说明（尺寸继承、不参与标题伸缩、与垃圾桶的间距、为何用中性色），
+   现在没有规则可解释了 —— 整段清掉，避免它看起来像「类还在、只是没写规则」。
+   这里刻意不写出那个被删掉的类名：dead-css 扫整份文件原文、不区分注释，
+   注释里带点写一次就等于声称「这个类还有定义」，反而会把它报成死规则。
+   紧接着下面这段复制按钮的注释里也不再提它。 */
+/* 条目头部的「复制 ID / 复制内容」（id=389 待审核，id=393 扩到待执行）。
+   与旁边的图标按钮（头部删除那颗）**同高 26px、同样不参与标题伸缩**，
+   但形态仍保留文字胶囊 —— 它们是一个动作组，需要读成「复制」这一簇，
+   而图标没有文字，两个图标并排反而看不出各自复制什么。
+   区别于别处控件有两点：
+   1. 用 .plt-head-copies 容器把两颗包起来并 gap:4px —— 同一动作组内部的间距
+      要比与别组控件更紧，视觉上才收得成一簇；
+   2. 颜色走 accent 描边（复制是中性动作，不该和「删除」这类破坏性按钮抢眼）。
+   为什么不复用 .plt-copy-btn：那个是 12px / 3px 9px 的展开区尺寸，
+   塞进 20px 行高的头部会显得矮胖；这里与图标按钮对齐成 26px。 */
+.plt-head-copies{flex:0 0 auto;align-self:center;display:inline-flex;align-items:center;gap:4px;margin-right:2px}
+.plt-head-copy{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;height:26px;padding:0 9px;border-radius:999px;border:1px solid rgba(var(--plt-accent,140,140,140),.4);background:transparent;color:rgba(var(--plt-accent,140,140,140),.95);font-size:11.5px;line-height:1;font-weight:500;white-space:nowrap;cursor:pointer;transition:background .14s ease,border-color .14s ease,color .12s ease,opacity .12s ease}
+.plt-head-copy:hover:not(:disabled){background:rgba(var(--plt-accent,140,140,140),.13);border-color:rgba(var(--plt-accent,140,140,140),.62);color:rgba(var(--plt-accent,140,140,140),1)}
+.plt-head-copy:active:not(:disabled){transform:translateY(.5px)}
+.plt-head-copy:disabled{opacity:.42;cursor:default}
+.plt-head-copy:disabled:hover{background:transparent;border-color:rgba(var(--plt-accent,140,140,140),.4)}
+/* 复制成功：短暂变绿一档，与展开区那几颗 .plt-copy-btn.done 同一语义。 */
+.plt-head-copy.done{background:rgba(76,175,80,.16);border-color:rgba(76,175,80,.5);color:#bfe6c1}
+/* 窄侧栏：收字号与内距，让宽度回到标题（头部本来就挤）。 */
+@container (max-width:360px){.plt-head-copies{gap:3px}.plt-head-copy{font-size:10.5px;padding:0 7px}}
+/* 待审核头部的「通过」（id=390）：复用 .plt-icon-btn 的 36×26 热区与
+   .plt-pass-icon 的主色描边（与底部操作区那颗同一套视觉），
+   这里只补头部特有的约束：
+   1. flex:0 0 auto + align-self:center —— 与旁边两颗复制胶囊、置顶槽一起
+      各自居中对齐，不参与标题伸缩；
+   2. margin-right:2px —— 与复制组、置顶槽之间的固定间距，
+      与 .plt-head-del / .plt-head-copy 同一套算法，不依赖父容器 gap。
+   为什么不做成实心主色块：头部这一行已经有复制胶囊与状态徽标，
+   再来一块实心蓝会把「标题」这个视觉主角压掉。描边 + 主色 icon 已经足够
+   说明它是这一行里唯一推进状态的动作，也仍与复制（accent 描边）区分得开。 */
+.plt-head-pass-btn{flex:0 0 auto;align-self:center;margin-right:2px}
+/* 触屏档：图标按钮在 @media (hover:none) 里会变 40×32，这里不能再覆盖它的宽度，
+   否则「触屏热区更大」的既有约定会被头部这一处破例。 */
+.plt-del{margin-left:auto;color:#d46a6a;border-color:rgba(212,106,106,.35)}
+/* 删除键已经收进 .plt-actions，靠右由容器负责，这里不能再 margin-left:auto，否则会把同组的「转为待执行」推开。 */
+.plt-checks .plt-actions .plt-del{margin-left:0}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【10】子任务（拆解批次）
+ * 源：20-css/19-kids.js（34 条规则）
+ * 批次父条目下的子任务行、层级缩进、子任务自己的勾选与复制。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* —— 父行：批次标题 ——
+   id=369 起标题比子任务大 1px（15 vs 14）且更重，左侧一道 3px 竖杠把「这是容器」说清楚。
+   .plt-head 本来就是 flex，竖杠用 ::before 定宽定位，不参与排版。 */
+.plt-item.plt-parent{background:linear-gradient(180deg,rgba(var(--plt-accent,140,140,140),.055),rgba(var(--plt-accent,140,140,140),.012) 42%,transparent 100%)}
+.plt-item.plt-parent.open{border-color:rgba(var(--plt-accent,140,140,140),.42)}
+.plt-item.plt-parent > .plt-head{position:relative;padding-left:13px}
+.plt-item.plt-parent > .plt-head::before{content:'';position:absolute;left:5px;top:9px;bottom:9px;width:3px;border-radius:2px;background:rgba(var(--plt-accent,140,140,140),.55);transition:background .14s ease,box-shadow .16s ease}
+.plt-item.plt-parent.open > .plt-head::before{background:rgba(var(--plt-accent,140,140,140),.9);box-shadow:0 0 8px -1px rgba(var(--plt-accent,140,140,140),.55)}
+/* id=369：随子任务名一起上调一档（14px → 15px）。
+   不是顺手改的：子任务名调大后会正好等于父行原来的 14px，两层标题一样大，
+   「父行是容器、子任务在它里面」这个层级就没了 —— 而这是本文件开头第 1 条
+   定下的规矩（「父行标题比子任务大一档」）。所以两级一起抬，相对差保持 1px。 */
+.plt-item.plt-parent > .plt-head .plt-name{font-size:15px;font-weight:600;letter-spacing:.005em}
+.plt-item.plt-parent .plt-kids{flex:0 0 auto;font-size:11px;line-height:16px;padding:0 6px;border-radius:999px;color:rgba(var(--plt-accent,140,140,140),.95);background:rgba(var(--plt-accent,140,140,140),.14);border:1px solid rgba(var(--plt-accent,140,140,140),.28);white-space:nowrap;font-variant-numeric:tabular-nums}
+.plt-item.plt-parent.open .plt-kids{background:rgba(var(--plt-accent,140,140,140),.24)}
+/* —— 展开区：不留父级计划块的空白 ——
+   父的 body 只有子任务列表 + 折叠的原文，上下 padding 收紧到 2/10，
+   并去掉 15-detail.js 那条 28px 的左缩进（那是给「计划正文」对齐用的）。 */
+.plt-body.plt-body-parent{padding:2px 10px 10px 10px;margin-top:0;border-top:1px solid rgba(var(--plt-accent,140,140,140),.16)}
+/* —— 子任务列表：缩进一层 + 连接线 ——
+   竖线挂在列表容器上（贯穿整批），每一项再用 ::before 画一小段横钩指回它，
+   这样即便子任务之间的间隙变大，归属关系也不会断。 */
+/* id=318/315：子任务之间原来是 5px 的紧贴，多行正文一多就糊成一片。
+   先拉到 9px，卡片内距从 6/8 提到 7/9；id=87-A 再抬到 12px ——
+   +3px 虽不到题干说的 4px 量级，但 12 是 4 的倍数，与卡片内其它间距
+   （4/5/6/8）的节奏一致；原来那个 9px 恰恰是全文件**唯一**的 9，本来就出格。
+   不取 13px 的原因：更接近「+4」，但会破坏 4 的倍数节奏，得不偿失。
+   窄侧栏（≤320px）在文件末尾再收回去，否则小屏反而更挤。 */
+.plt-kids-list{display:flex;flex-direction:column;gap:12px;margin:4px 0 8px 8px;padding-left:12px;border-left:2px solid rgba(var(--plt-accent,140,140,140),.26)}
+/* id=370：卡片改成 flex 纵向 + gap，三块（名称行 / 内容 / 备注）的间距由这一个
+   gap 统一给，不再各块自带 margin-top。
+   为什么换成 gap 而不是把 margin 调大：用 margin 时「有没有下一块」决定了间距，
+   最后一块永远多留一段空气；而 gap 只画在**相邻两块之间**，缺块就自然没有间距 ——
+   备注为空（节点根本不渲染）时不可能残留空白，这是结构保证，不靠再去补一条
+   :last-child 规则抵消。
+   gap 取 5px：原先是各 3px 的 margin，视觉上偏挤（两段正文几乎贴在一起）。
+   行高（plan 1.6 / note 1.55）与换行（pre-wrap + break-word）一个字没动 ——
+   这一条只动块与块之间的间距。 */
+.plt-kid{display:flex;flex-direction:column;gap:5px;position:relative;border:1px solid var(--dsw-alias-border-secondary,rgba(255,255,255,.07));border-radius:7px;background:var(--dsw-alias-bg-secondary,rgba(255,255,255,.02));padding:7px 9px}
+/* 横钩从左缘连接线（2px 宽 + 12px 内距 = 14px）一路画到卡片左边，两头都接上。 */
+.plt-kid::before{content:'';position:absolute;left:-14px;top:13px;width:14px;height:2px;border-radius:1px;background:rgba(var(--plt-accent,140,140,140),.30)}
+.plt-kid:hover{border-color:rgba(var(--plt-accent,140,140,140),.28);background:var(--dsw-alias-bg-secondary,rgba(255,255,255,.035))}
+.plt-kid:hover::before{background:rgba(var(--plt-accent,140,140,140),.6)}
+/* id=362：这一行改成**基线对齐**，并且明确禁止换行。
+   原来是 align-items:center —— 对纯文字够用，但编号胶囊（11px/16px 行高）
+   和标题（13px/1.5）字号行高都不同，居中对齐会让两者的字脚差 1~2px；
+   一列扫下来编号像「浮」在标题左边。基线对齐后 2-A 与标题的第一个字
+   踩在同一条线上，读起来才是一个整体。
+   flex-wrap:nowrap 是显式写出来的（flex 默认就是 nowrap）：
+   这一行的规矩是「标题可以让位，标签不许掉行」，写出来免得后来的人改成 wrap。
+   注意：一旦改成 baseline，就不要再给子项写 vertical-align —— 那是行内排版的东西，
+   flex 子项不认。 */
+.plt-kid-h{display:flex;align-items:baseline;flex-wrap:nowrap;gap:6px;min-width:0}
+/* 基线对齐只对**文字**成立。下面这几类不是文字、或者内部已经自己居中，
+   让它们参与基线会被按「最后一行文字的基线」摆位置，视觉上会整体上浮：
+   对勾方框、类型图标胶囊、按钮、以及裸 svg（转圈）。
+   统一钉回 center，保持它们在 id=361 之前的样子。
+   选择器都用直接子元素（>）：类型图标和「通过」按钮只挂在行首这一层。 */
+.plt-kid-h > .plt-kid-check,.plt-kid-h > .plt-tag,.plt-kid-h > .plt-copy-btn,.plt-kid-h > svg{align-self:center}
+/* id=322 立的规矩：children 行不再画顶层那套 #id（.plt-id）。
+   但「不画编号」被推到了反面——子任务在展开区里排成一片，用户没法把
+   「刚才那条 2-A」对上界面上的某一行。id=361 把它加回来，形状与顶层那枚不同：
+   顶层是 #12 的裸文本，这里是一枚窄胶囊，因为它要在一行里跟标题抢宽度。
+   位置：对勾之后、标题之前；所有状态都画（编号是身份，不是状态）。
+   flex:0 0 auto + tabular-nums：宽度只随位数变化（2-A / 12-AA），
+   同一批里各行的数字位数一致，纵向扫下来编号列是齐的。
+   code 为空时 JS 直接不渲染这个节点（不是 visibility:hidden），
+   所以这里不需要「占位」规则——手工新建的条目本来就没有编号可对齐。 */
+/* id=362：宽度不够时的让位顺序，靠 flex 的伸缩比写死在两处（这里与 .plt-kid-name）：
+   本标签 flex-shrink:0 → 一像素都不让，永远完整可读；
+   标题 flex-shrink:1 + min-width:0 → 由它独自吃掉全部压缩，最后以省略号收尾。
+   所以窄侧栏里看到的是「2-A 完整 + 标题变短」，不会是「标签被压成 2…」。 */
+.plt-kid-code{flex:0 0 auto;font-size:11px;line-height:16px;padding:0 5px;border-radius:5px;font-variant-numeric:tabular-nums;letter-spacing:.01em;color:rgba(var(--plt-accent,140,140,140),.95);background:rgba(var(--plt-accent,140,140,140),.13);border:1px solid rgba(var(--plt-accent,140,140,140),.26);white-space:nowrap}
+/* 已做的行：编号跟着整卡一起沉下去，但不能消失——回看历史时更需要编号定位。 */
+.plt-kid-done .plt-kid-code{color:var(--dsw-alias-label-caption,#8a8a8a);background:rgba(var(--plt-accent,140,140,140),.07);border-color:rgba(var(--plt-accent,140,140,140),.16)}
+/* id=362：标题是**唯一**可压缩项。min-width:0 必须留着 —— flex 子项默认
+   min-width:auto（= 内容宽度），没有它这一行根本缩不进去，省略号永远不出现。
+   注意本层**故意不写 overflow:hidden**（id=362 的第二个修正）：带 overflow:hidden
+   的 flex 项在 baseline 对齐里没有文字基线，会退化成「按底边对齐」，
+   于是编号胶囊会被拉到标题的底边 —— 那正是要避免的错位。
+   截断交给下面那层内层块，本层只负责「我是可伸缩的 flex 项」。 */
+/* id=369：子任务名 13px → 14px（调大一档）。
+   为什么只动字号、别的一律不碰：字重 600、颜色（label-primary / 已做行的
+   label-secondary）、换行与截断三件套都在别处或下一层，改字号不会牵动它们。
+   调大之后这一行的行高会跟着长 1~2px（没有显式 line-height，走的是 normal），
+   这是可接受的——编号胶囊 16px 行高 + 上下各 1px 描边 = 18px，
+   原来 13px 的标题行盒约 18px、正好齐平，现在 14px 约 19.6px，标题成为行高的决定项。
+   不会因此溢出：这一层是 flex:1 1 auto + min-width:0，压缩全部由它承担，
+   真正的截断在内层 .plt-kid-name-text（nowrap + hidden + ellipsis），
+   两者都与字号无关，放大一档不影响它们成立。 */
+.plt-kid-name{flex:1 1 auto;min-width:0;font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary,#f0f2f5)}
+/* 内层：真正的截断层。display:block 让它撑满外层宽度，nowrap + hidden + ellipsis
+   三件套都落在这一层，外层因此保住基线、内层负责省略号。 */
+.plt-kid-name-text{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* id=370：不再自带 margin-top —— 三块的间距统一由 .plt-kid 的 gap 给。
+   留着 margin 会与 gap 叠加（3 + 5 = 8px），而且最后一块仍然多出 3px 空气。
+   内层的行高与换行原样保留：这条重建只动「块与块之间」。 */
+.plt-kid-plan{font-size:13px;line-height:1.6;color:var(--dsw-alias-label-secondary,rgba(255,255,255,.78));white-space:pre-wrap;word-break:break-word}
+.plt-kid-note{font-size:12px;line-height:1.55;color:var(--dsw-alias-label-caption,#8a8a8a);white-space:pre-wrap;word-break:break-word}
+.plt-kid-note-h{display:inline-block;margin-right:6px;font-weight:600;opacity:.8}
+/* id=371：子任务行内那颗「单个通过」的样式已随按钮一起删除。
+   注意：这里刻意**不写出那个类名**。dead-css.mjs 扫的是整份文件的原始文本、
+   不区分注释：
+     - 在 CSS 文件里，形如「点 + 类名」的写法会被当成一次**定义**。
+       这条删除就踩过它 —— 真规则删了、注释里留着带点的名字，
+       扫描器照样判成「有人定义、没人用」，报错。
+     - 反过来，在 JS 文件里裸写类名会被当成一次**引用**，
+       让一条本该报死的规则看起来「有人在用」。
+   结论：注释里用文字描述即可，别写出类名。 */
+/* id=382：头部那颗「通过」胶囊（原 head-pass，id=354/368/373 三代演进）
+   已随「改到底部操作区、做成图标」一并删除。
+   这里不保留任何空规则 —— 它已无宿主，dead-css.mjs 会报。
+   与垃圾桶配对的那个图标按钮，样式在 15-detail.js（pass-icon），
+   尺寸/hover/disabled 与 trash 共用同一套，符合本条「与垃圾桶一致」的要求。 */
+/* —— 已做的子任务（id=316）——
+   区分靠三件事叠加，任何一项单独都不够明显：
+   1. 左侧对勾 + 标题与正文改用次要文字色（不再和未做项抢注意力）；
+   2. 整卡略沉下去（浅底色 + 边框更淡），读起来像「已完成的历史」；
+   3. 正文与备注降一档不透明度，但**不降到读不清**（id=317 会把两套主题的对比度补齐）。
+   未做项一条规则都不碰 —— 保持原来的强调，避免整屏观感被拉平。 */
+.plt-kid-done{background:var(--dsw-alias-bg-tertiary,rgba(255,255,255,.035));border-color:var(--dsw-alias-border-secondary,rgba(255,255,255,.05))}
+.plt-kid-done .plt-kid-name{color:var(--dsw-alias-label-secondary,rgba(255,255,255,.78));font-weight:500}
+.plt-kid-done .plt-kid-plan{color:var(--dsw-alias-label-secondary,rgba(255,255,255,.78));opacity:.86}
+.plt-kid-done .plt-kid-note{opacity:.82}
+.plt-kid-done::before{background:rgba(var(--plt-accent,140,140,140),.18)}
+.plt-kid-done:hover{background:var(--dsw-alias-bg-hover,rgba(255,255,255,.055))}
+/* 对勾：固定 12px 方框，不参与文字省略，未做项不占位（省下 12+6px 给标题）。 */
+.plt-kid-check{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border-radius:3px;font-size:10px;line-height:1;color:var(--dsw-alias-label-accent,#7fb0ff);background:rgba(var(--plt-accent,140,140,140),.16)}
+/* id=322：未做的行也占这个 12px 槽位，只把颜色与底色收掉 —— 否则两种行标题起点差一截。 */
+.plt-kid-check.is-off{visibility:hidden;background:transparent}
+/* 窄侧栏：收紧缩进与字号，父行标题不与徽标抢宽度。
+   id=361：编号胶囊在这个宽度下再收一档（字号 -1px、左右各减 1px 内距）——
+   它恒占宽度且不会省略，是标题被压短时最先该让位的东西。
+   id=369：子任务名也收一档（14 → 13px）。不加这一条的话，父行标题收下来变成
+   14px、子任务名仍是 14px，两层一样大 —— 「父行比子任务大一档」的层级在窄侧栏里
+   就失效了。现在父 14 / 子 13，层级在任何宽度下都保住。 */
+@container (max-width:320px){.plt-kid-code{font-size:10px;padding:0 4px}.plt-kid-name{font-size:13px}.plt-kid-plan,.plt-kid-note{font-size:12px}.plt-kids{display:none}.plt-kids-list{gap:9px;margin-left:4px;padding-left:9px}.plt-kid{padding:6px 8px}.plt-kid::before{left:-11px;width:11px}.plt-item.plt-parent > .plt-head .plt-name{font-size:14px}}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【11】待审核批量操作区
+ * 源：20-css/16-bulk.js（37 条规则）
+ * 批量条容器、全选勾选、计数、「全部通过」「批量删除」、进行中态。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* —— 「待审核」组底部固定的一排批量操作 —— */
+/* 批量操作条：底色加深一档 + 顶部一条更实的强调线，让「全选 / 全部通过 / 全部删除」
+   这一排从列表里明确分离出来。 */
+.plt-bulk{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:7px 8px;border-top:1px solid rgba(var(--plt-accent,140,140,140),.45);background:linear-gradient(180deg,rgba(var(--plt-accent,140,140,140),.16),rgba(var(--plt-accent,140,140,140),.08));flex-wrap:nowrap;min-width:0}
+.plt-bulk .plt-check{flex:0 0 auto;font-size:12.5px;gap:5px;color:var(--dsw-alias-label-primary,#e6e6e6);font-weight:500}
+.plt-bulk .plt-check input{width:14px;height:14px}
+.plt-bulk-count{flex:1 1 auto;min-width:0;font-size:12px;color:var(--dsw-alias-label-secondary,#c8c8c8);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 「全部通过」：实心强调色，跟「开始干活」同一档分量。 */
+.plt-bulk-pass{flex:0 0 auto;font-size:12.5px;font-weight:600;padding:4px 12px;border-radius:999px;border:1px solid rgba(var(--plt-accent,140,140,140),.7);color:#1b1200;background:linear-gradient(180deg,rgba(var(--plt-accent,140,140,140),.98),rgba(var(--plt-accent,140,140,140),.82));box-shadow:0 1px 2px rgba(0,0,0,.2),0 0 12px -5px rgba(var(--plt-accent,140,140,140),.8)}
+.plt-bulk-pass:hover:not(:disabled){background:linear-gradient(180deg,rgba(var(--plt-accent,140,140,140),1),rgba(var(--plt-accent,140,140,140),.9));box-shadow:0 1px 3px rgba(0,0,0,.24),0 0 18px -4px rgba(var(--plt-accent,140,140,140),.9)}
+.plt-bulk-pass:active:not(:disabled){transform:translateY(1px)}
+.plt-bulk-pass:disabled{opacity:.4;cursor:default;box-shadow:none}
+/* 「已审核」组底部的批量删除：危险色实心，与「全部通过」区分开。 */
+.plt-bulk-danger{border-top-color:rgba(214,68,68,.5);background:linear-gradient(180deg,rgba(214,68,68,.18),rgba(214,68,68,.09))}
+.plt-bulk-del{flex:0 0 auto;font-size:12.5px;font-weight:600;padding:4px 12px;border-radius:999px;border:1px solid rgba(214,68,68,.75);color:#fff;background:linear-gradient(180deg,rgba(214,68,68,.92),rgba(178,48,48,.82));box-shadow:0 1px 2px rgba(0,0,0,.2),0 0 12px -5px rgba(214,68,68,.8)}
+.plt-bulk-del:hover:not(:disabled){background:linear-gradient(180deg,rgba(230,80,80,1),rgba(198,56,56,.9));box-shadow:0 1px 3px rgba(0,0,0,.24),0 0 18px -4px rgba(214,68,68,.9)}
+.plt-bulk-del:active:not(:disabled){transform:translateY(1px)}
+.plt-bulk-del:disabled{opacity:.4;cursor:default;box-shadow:none}
+/* id=405：草稿组整体的移除带走了这里两组规则与说明 ——
+   「草稿组底部的批量转待执行」和「条目内的转为待执行 / 转为草稿」。
+   两者都是 .plt- 前缀的独立类，dead-css 能直接报出来，所以规则本身在 61-B 就删干净了；
+   这里剩下的只是描述它们的注释，本轮一并清掉。 */
+/* 条目内的「审核通过」在 id=193 已搬进「计划」标题行、改用 .plt-copy-btn（与「提示词」同款），
+ * 这套实心琥珀胶囊样式与 30-light.js 里的浅色覆盖一并删除 —— 留着就是 dead-css 门禁要抓的死规则。 */
+/* 「开始干活」：待执行组底部的主动作按钮。用本组的粉调做强调，实心填充，比其他按钮更显眼。 */
+.plt-bulk-start{border-top-color:rgba(var(--plt-accent,140,140,140),.32);background:rgba(var(--plt-accent,140,140,140),.07)}
+.plt-bulk-go{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:5px;font-size:12.5px;font-weight:600;line-height:18px;white-space:nowrap;padding:4px 14px;border-radius:999px;border:1px solid rgba(var(--plt-accent,140,140,140),.62);color:#fff;background:linear-gradient(180deg,rgba(var(--plt-accent,140,140,140),.92),rgba(var(--plt-accent,140,140,140),.72));box-shadow:0 1px 2px rgba(0,0,0,.18),0 0 12px -4px rgba(var(--plt-accent,140,140,140),.7)}
+/* 图标 + 文案都要单行：窄面板下也不许折成两行。 */
+.plt-bulk-go>svg,.plt-bulk-go>span{flex:0 0 auto;white-space:nowrap}
+/* 「干活中」：不再是可以点的主动作，改成半透明的进行中状态，转圈图标负责表示活着。 */
+.plt-bulk-go.is-working{cursor:default;color:rgba(255,255,255,.92);border-color:rgba(var(--plt-accent,140,140,140),.34);background:rgba(var(--plt-accent,140,140,140),.16);box-shadow:none;opacity:1}
+.plt-bulk-go.is-working:disabled{opacity:1}
+.plt-bulk-go:hover:not(:disabled){background:linear-gradient(180deg,rgba(var(--plt-accent,140,140,140),1),rgba(var(--plt-accent,140,140,140),.82));box-shadow:0 1px 3px rgba(0,0,0,.22),0 0 18px -3px rgba(var(--plt-accent,140,140,140),.85)}
+.plt-bulk-go:active:not(:disabled){transform:translateY(1px)}
+.plt-bulk-go:disabled{opacity:.5;cursor:default}
+/* 条目左侧的批量勾选框 */
+.plt-pick{flex:0 0 auto;display:inline-flex;align-items:center;margin-right:1px}
+.plt-pick input{width:13px;height:13px;cursor:pointer;margin:0}
+.plt-pick input:disabled{cursor:default}
+.plt-empty{padding:24px 12px;text-align:center;color:var(--dsw-alias-label-caption,#8a8a8a);line-height:1.75;font-size:14px}
+/* 空组（比如待审核 0 条）仍然显示组头，展开时把提示图文上下左右居中。 */
+.plt-group-empty{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:14px;color:var(--dsw-alias-label-caption,#8a8a8a);font-size:12.5px;opacity:.8;text-align:center;line-height:1.6}
+.plt-group-empty svg{opacity:.6}
+.plt-err{margin:6px 10px;padding:7px 10px;border-radius:6px;background:rgba(212,106,106,.12);border:1px solid rgba(212,106,106,.35);color:#e08b8b;line-height:1.55;word-break:break-word;font-size:14px}
+/* 「没有可用模型」的引导条（id=364）。
+   和 .plt-err 刻意分开：这不是错误（没有模型不等于用坏了），用琥珀而不是红 ——
+   红色会让人以为自己做错了什么，而真实情况通常是「还没配」或「刚配好还没刷新」。
+   横向排：左边一句说明，右侧一个可点的动作。窄侧栏时文字换行、按钮始终不被压掉
+   （按钮 flex:0 0 auto，说明文字 flex:1 1 auto + min-width:0）。 */
+.plt-guide{display:flex;align-items:center;gap:8px;margin:6px 10px;padding:7px 10px;border-radius:6px;background:rgba(255,180,60,.10);border:1px solid rgba(255,180,60,.32);color:#e0b276;line-height:1.55;word-break:break-word;font-size:13px}
+.plt-guide-txt{flex:1 1 auto;min-width:0}
+.plt-guide-btn{flex:0 0 auto}
+.plt-mask{position:absolute;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px;z-index:20}
+.plt-dialog{width:100%;max-width:360px;background:var(--dsw-alias-bg-primary,#1e1e1e);border:1px solid var(--dsw-alias-border-secondary,rgba(255,255,255,.14));border-radius:10px;padding:16px;box-shadow:0 12px 32px rgba(0,0,0,.4)}
+.plt-dialog h3{margin:0 0 9px;font-size:16px}
+.plt-dialog p{margin:0 0 13px;line-height:1.7;color:var(--dsw-alias-label-secondary,#c0c0c0);font-size:14px}
+.plt-dialog code{font-size:14px;background:var(--dsw-alias-bg-tertiary,rgba(0,0,0,.25));padding:1px 4px;border-radius:4px}
+.plt-actions{display:flex;gap:8px;justify-content:flex-end}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【12】操作条与胶囊
+ * 源：20-css/18-chips.js（24 条规则）
+ * 二级操作条、胶囊按钮（复制 ID / 复制内容 / 置顶）、发送按钮。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+.plt-chip{display:inline-flex;align-items:center;gap:5px;cursor:pointer;border:1px solid transparent;background:var(--dsw-alias-bg-secondary,rgba(255,255,255,.06));color:var(--dsw-alias-label-secondary,#c8c8c8);border-radius:999px;padding:6px 11px 6px 9px;font-size:14px;line-height:1;white-space:nowrap;font-family:inherit;transition:background .12s ease,color .12s ease,border-color .12s ease}
+.plt-chip:hover:not(:disabled){background:var(--dsw-alias-bg-hover,rgba(255,255,255,.11));color:var(--dsw-alias-label-primary,#e6e6e6)}
+.plt-chip.active{background:rgba(80,140,255,.18);border-color:rgba(80,140,255,.5);color:#9dc0ff}
+.plt-chip:disabled{opacity:.5;cursor:default}
+.plt-chip svg{flex:0 0 auto;opacity:.95;display:block}
+/* 图标单独套一层定高定宽的居中盒：SVG 的 display:block 会让它按基线落位，
+   和 14px 文字排在一起时矮半像素；这层 line-height:0 的 flex 盒子把它钉在文字中线上。 */
+.plt-chip-ico{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;line-height:0}
+.plt-chip-txt{display:inline-flex;align-items:center;line-height:1}
+/* 发送钮加宽（id=174）：32 → 38px（+18.75%，落在需求给的 10%~20% 区间），只动水平方向。
+   圆角必须跟着从 50% 换成定值 16px：50% 按各自轴算，38x32 得到 rx=19/ry=16 的压扁椭圆，
+   端部不是半圆；16px = 高度的一半，两轴都不触发 CSS 半径收缩，是精确的「两端半圆 + 直边」胶囊。
+   （实测比对 .shot/174-inset.mjs；999px 与 16px 在这台 Chrome 上逐行一致 —— 999 会被收缩规则
+   clamp 回 16，但 16px 不依赖那条规则，且面板压矮的窄档把尺寸改成 26x26 时，
+   16+16>26 自动 clamp 成 13 = 边长一半，回到正圆，一个值两种尺寸都对。）
+   高度、字号、颜色、内边距、垂直居中（align/justify:center）全部保持不变。 */
+.plt-send{flex:0 0 auto;width:38px;height:32px;border-radius:16px;border:none;padding:0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;background:var(--dsw-alias-bg-accent,#2f6fd0);color:#fff;box-shadow:0 2px 6px -2px rgba(47,111,208,.55),inset 0 1px 0 rgba(255,255,255,.22);transition:transform .1s ease,opacity .12s ease,background .12s ease,box-shadow .14s ease}
+.plt-send:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 10px -3px rgba(47,111,208,.62),inset 0 1px 0 rgba(255,255,255,.26)}
+.plt-send:active:not(:disabled){transform:translateY(0) scale(.96)}
+.plt-send:disabled{opacity:.38;cursor:default}
+/* hover 只做「当前状态稍微加深」，不换成另一种颜色（id=107）。 */
+/* 深入开关：圆形，与发送键同一套造型（id=405：它原本是「与草稿开关同款」，草稿开关已删）。 */
+.plt-deep-toggle{flex:0 0 auto;width:32px;height:32px;border-radius:50%;padding:0;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;background:transparent;color:var(--dsw-alias-label-caption,#9a9a9a);border:1px solid var(--dsw-alias-border-secondary,rgba(255,255,255,.16));transition:transform .1s ease,color .12s ease,border-color .12s ease,background .12s ease,box-shadow .14s ease}
+.plt-deep-toggle:hover:not(:disabled){background:rgba(150,158,170,.10);border-color:rgba(150,158,170,.4)}
+.plt-deep-toggle:active:not(:disabled){transform:scale(.94)}
+.plt-deep-toggle:disabled{opacity:.38;cursor:default}
+.plt-deep-toggle.on{background:rgba(104,116,232,.92);color:#fff;border-color:transparent;box-shadow:0 2px 7px -2px rgba(104,116,232,.62),inset 0 1px 0 rgba(255,255,255,.22)}
+.plt-deep-toggle.on:hover:not(:disabled){color:#fff;background:rgba(88,100,216,.96)}
+/* 拆解模式：贴在「仅回答」右侧的独立开关（不属于任务类型，两者可共存）。
+   与类型胶囊靠「形状」区分而不只是颜色：圆角方块 + 虚线空心（未选中）／ 琥珀实心 + 实线（选中）；
+   类型胶囊是全圆胶囊、选中走蓝色，两者形状与色系都不同，一眼能看出它是「叠加」不是「三选一」。 */
+.plt-chip-split{position:relative;border-radius:9px;padding:0 10px;gap:5px;background:rgba(255,255,255,.02);border:1px dashed rgba(255,255,255,.26);color:var(--dsw-alias-label-secondary,#aab2bf);letter-spacing:.02em}
+.plt-chip-split:hover:not(:disabled){background:rgba(255,255,255,.08);border-color:rgba(255,163,64,.62);color:#f0b060}
+.plt-chip.plt-chip-split.active{background:rgba(214,132,32,.88);border:1px solid rgba(255,186,104,.9);color:#fff;box-shadow:0 2px 8px -2px rgba(214,132,32,.6),inset 0 1px 0 rgba(255,255,255,.28)}
+.plt-chip.plt-chip-split.active:hover:not(:disabled){background:rgba(226,144,40,.94);border-color:rgba(255,200,130,.95);color:#fff}
+/* 选中态右上角小圆点：明示这是叠加在已选类型之上的开关，不是第四个互斥选项。 */
+.plt-chip.plt-chip-split.active::after{content:'';position:absolute;top:3px;right:3px;width:5px;height:5px;border-radius:50%;background:#fff;opacity:.85}
+.plt-foot{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:5px 12px 9px;color:var(--dsw-alias-label-caption,#8a8a8a);font-size:14px;opacity:.8}
+.plt-foot-text{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ────────────────────────────────────────────────────────────
+ * 主题覆盖 · 浅色（必须最后）
+ * 源文件：src/styles/03-theme.css（141 条规则）
+ * ──────────────────────────────────────────────────────────── */
+/* ============================================================================
+ * DSH「任务列表」插件样式 · 第 3/3 段：主题覆盖（浅色）
+ * ============================================================================
+ *
+ * **本文件必须排在三段最后**，这不是排版偏好而是功能前提。
+ *
+ * 插件默认按**深色**写基础规则（面板在深色侧栏里），浅色主题靠这一整段
+ * 用 `body:not([data-ds-dark-theme])` 前缀**覆盖**。覆盖能生效靠两件事：
+ *   1. 前缀把特异度抬高（多一个属性选择器）；
+ *   2. 同特异度时「后写者胜」—— 所以它在文件里必须靠后。
+ * `build.mjs` 按文件名字典序拼接，`03-` 前缀把它钉在最后。
+ *
+ * ── 只写「与深色不同的部分」 ───────────────────────────────────────────────
+ * 这是本段的铁律。深色侧已经写对的属性，这里一个都不要重复，
+ * 否则同一个值要在两处维护，迟早不一致。
+ *
+ * ── 为什么单独一段而不是散在各处 ───────────────────────────────────────────
+ * 早先的 30-light.js 就是这么做的（137 条规则集中在一个片段）。
+ * 好处是「调浅色」只需看一个文件，坏处是它必须知道深色侧写了什么 ——
+ * 76 个 `body:not(...)` 里有一批是为修对比度而压低色值的，
+ * 改深色侧的颜色时容易忘记同步这里。搬运时保留原有的 id 注释，别删，
+ * 那些注释记录了「为什么这个值要被压深」。
+ * ========================================================================== */
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【13】浅色 · 面板与顶栏
+ * 源：20-css/30-light.js 的前段（面板根、标题、按钮、图标、输入区）
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* ============================================================
+   主题变量兜底（只补浅色）
+   ------------------------------------------------------------
+   这个插件的样式引用了几个简写 token（--dsw-alias-bg-primary /
+   bg-secondary / bg-tertiary / bg-hover / bg-accent / border-secondary /
+   border-accent / label-accent）。它们不是 dsh-client-ui-theme 里定义的
+   名字（那边用的是 bg-layer-N、interactive-bg-hover、border-lN、
+   state-business-primary），所以一直走的是各条规则里 var() 的兜底值。
+   深色主题下保持原样（不定义，继续走兜底）；浅色主题下在这里补出
+   一套浅色值，作用域只到 .plt-root，不污染宿主其它区域。
+   ============================================================ */
+body:not([data-ds-dark-theme]) .plt-root{
+  --dsw-alias-bg-primary:#fff;
+  --dsw-alias-bg-secondary:rgba(15,30,60,.035);
+  --dsw-alias-bg-tertiary:#f4f6f9;
+  --dsw-alias-bg-hover:rgba(38,49,72,.11);
+  --dsw-alias-interactive-bg-hover:rgba(38,49,72,.11);
+  --dsw-alias-bg-accent:#2f6fd0;
+  --dsw-alias-border-secondary:rgba(20,40,70,.24);
+  --dsw-alias-border-accent:rgba(47,111,208,.55);
+  --dsw-alias-label-accent:#1f6fd0;
+  /* 悬浮提示（id=248）：浅色用「浅底深字 + 柔和阴影」。
+     底走不透明的 #fff —— 气泡底下可能是卡片、可能是输入框，半透明会跟着变脏；
+     浮层本来就要脱离背景，宁可实心。文字 #1f2733 在白底上 15.04:1。
+     阴影比深色轻一档（深色靠暗度分离，浅色靠柔和投影分离）；
+     边框 .22 与气泡底 1.55:1，只求在浅底上勾出边界，不需要更强。 */
+  --plt-tip-bg:#ffffff;
+  --plt-tip-fg:#1f2733;
+  --plt-tip-fg-muted:#4a5462;
+  --plt-tip-border:rgba(20,40,70,.22);
+  --plt-tip-shadow:0 1px 2px rgba(16,32,64,.10),0 10px 24px -8px rgba(16,32,64,.20);
+}
+
+/* ============================================================
+   浅色主题
+   ------------------------------------------------------------
+   上面的默认样式是照深色面板调的：大量写死的 rgba(255,255,255,…)
+   半透明叠层、深海军蓝的输入卡、偏黑的投影，这些在浅色下会糊成一片白。
+   主题插件是通过给 body 元素打 data-ds-dark-theme 属性来切换的
+   （dsh-client-ui-theme/lib/index.js 里 document.body.toggleAttribute(...)），
+   所以这里用 body:not([data-ds-dark-theme]) 覆盖：属性一变，
+   这些规则立刻生效，不需要 JS 参与，也不怕「跟随系统」的自动切换。
+   只覆盖在浅色下会失效的那些规则，能靠 --dsw-alias-* token 自适应的一律不动。
+   ============================================================ */
+
+/* —— 三组强调色在浅底上要压深，否则组名/标签几乎看不见 —— */
+body:not([data-ds-dark-theme]) .plt-group-reviewed{--plt-accent:96,106,122}
+/* id=226：琥珀 176,124,10 在白卡上只有 3.4:1（组名 3.46、标签 2.83），压到 138,95,6 后
+   alpha=1 时 5.25、组头 5.49，标签底也跟着变浅，仍然是同一个橙色相。 */
+body:not([data-ds-dark-theme]) .plt-group-unreviewed{--plt-accent:138,95,6}
+/* id=228：原本 31,111,208 太亮，「复制提示词」这类 accent@1 的文字落在 accent@.055 的卡片底上
+   只有 4.39:1（同色系浅底压浅字）。压深一档到 #175aac，同色相不变、明度降一档，比值抬到 6 以上。
+   id=406：待执行改绿后换成 22,101,52（#166534）；id=78-B/C 又统一改为红色变量，见 01-base.css 的【1.5】。
+   同时把沿用旧色号的标签一起换过来。 */
+body:not([data-ds-dark-theme]) .plt-group-todo{--plt-accent:var(--plt-todo,46,160,67)}
+body:not([data-ds-dark-theme]) .plt-deep-toggle{color:#5b6472;border-color:rgba(20,40,70,.22)}
+body:not([data-ds-dark-theme]) .plt-deep-toggle:hover:not(:disabled){background:rgba(20,40,70,.07);border-color:rgba(20,40,70,.34)}
+body:not([data-ds-dark-theme]) .plt-deep-toggle.on{background:#4a54c8;box-shadow:0 2px 6px -2px rgba(74,84,200,.5),inset 0 1px 0 rgba(255,255,255,.25)}
+body:not([data-ds-dark-theme]) .plt-deep-toggle.on:hover:not(:disabled){background:#3d47b4}
+body:not([data-ds-dark-theme]) .plt-chip-split{background:#fff;border-color:rgba(160,110,20,.45);color:#7a5220}
+body:not([data-ds-dark-theme]) .plt-chip-split:hover:not(:disabled){background:rgba(200,120,20,.09);border-color:rgba(180,112,18,.62);color:#8a5a12}
+body:not([data-ds-dark-theme]) .plt-chip.plt-chip-split.active{background:#b06f10;border-color:#9a5f0c;color:#fff;box-shadow:0 1px 3px rgba(120,72,10,.28)}
+body:not([data-ds-dark-theme]) .plt-chip.plt-chip-split.active:hover:not(:disabled){background:#c07a14;border-color:#b06f10;color:#fff}
+
+/* —— 顶层结构：分隔线、提示条 —— */
+body:not([data-ds-dark-theme]) .plt-top{border-bottom-color:rgba(20,40,70,.22)}
+body:not([data-ds-dark-theme]) .plt-btn{border-color:rgba(20,40,70,.24)}
+body:not([data-ds-dark-theme]) .plt-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(38,49,72,.06))}
+body:not([data-ds-dark-theme]) .plt-notice{background:rgba(34,150,70,.10);border-color:rgba(34,150,70,.39);color:#1c7c3e}
+body:not([data-ds-dark-theme]) .plt-auto.on{color:#1a5db8;border-color:rgba(26,93,184,.45)}
+/* 开始 / 暂停（id=207）浅色态：深色主题那两档 hover 底色在白底上偏灰，
+   换成饱和一点的绿 / 橙，并把文字压深 —— 白底上 .plt-btn 的继承色足够，
+   但 hover 时底色变浅会显得字发飘，所以显式钉一次。
+   id=354 起两者互斥渲染，同一条规则只会命中屏幕上唯一那颗按钮。 */
+/* id=85-B：开始按钮的绿改用 --plt-todo 变量（与深色同一条），不再硬编码。
+   浅色档 --plt-todo 已压到 #166534（7.13:1），白底上够深，不需要再单独调一个值。
+   文字色用更深的 fg 变体：hover 时底色是 .12 透明度的浅绿，
+   主色压在上面只有 5.02:1，而 fg（#14532d）能到 7.9:1。 */
+body:not([data-ds-dark-theme]) .plt-start:not(:disabled):hover{background:rgba(var(--plt-todo,46,160,67),.12);border-color:rgba(var(--plt-todo,46,160,67),.5);color:rgb(var(--plt-todo-fg,187,247,208))}
+/* id=88-B：暂停 hover 的白底配色改用 --plt-run 变量（原来是硬编码 216,120,32）。
+   浅色档 --plt-run 是深黄 #a16207，白底上 4.92:1，不需要再单独调一个值。 */
+body:not([data-ds-dark-theme]) .plt-pause:not(:disabled):hover{background:rgba(var(--plt-run,255,214,10),.10);border-color:rgba(var(--plt-run,255,214,10),.5);color:rgb(var(--plt-run-fg,255,233,138))}
+/* 开始 / 暂停的状态色（id=210）浅色态：深色主题的亮蓝 / 亮琥珀在 #fdfefe 上几乎看不见，
+   换成各自的深色系；禁用态沿用同一个 opacity，不另外调。 */
+body:not([data-ds-dark-theme]) .plt-start.is-resume:not(:disabled){color:#17539e;border-color:rgba(31,111,208,.46);background:rgba(31,111,208,.10)}
+body:not([data-ds-dark-theme]) .plt-start.is-resume:not(:disabled):hover{background:rgba(31,111,208,.17);border-color:rgba(31,111,208,.62)}
+body:not([data-ds-dark-theme]) .plt-pause:not(:disabled){color:#8a4a0e;border-color:rgba(176,94,20,.44)}
+/* id=88-B：浅色禁用态的 hover 清除（与深色段对称）。
+   否则白底上禁用按钮悬停仍会泛出淡红，看着像能点。 */
+body:not([data-ds-dark-theme]) .plt-start:disabled:hover,
+body:not([data-ds-dark-theme]) .plt-pause:disabled:hover{background:transparent;border-color:var(--dsw-alias-border-secondary,rgba(20,40,70,.22))}
+/* id=88-B：浅色 focus-visible 用更深的轮廓，白底上才看得清。 */
+body:not([data-ds-dark-theme]) .plt-start:focus-visible,
+body:not([data-ds-dark-theme]) .plt-pause:focus-visible{outline-color:var(--dsw-alias-border-accent,rgba(31,111,208,.8))}
+body:not([data-ds-dark-theme]) .plt-top.has-error .plt-start,
+body:not([data-ds-dark-theme]) .plt-top.has-error .plt-pause{border-color:rgba(198,40,40,.46)}
+
+/* —— 输入卡：深海军蓝 → 素白玻璃卡 —— */
+/* 外投影一律中性灰：深色主题里那几层偏蓝的投影（16,36,72 一带）是给海军蓝卡片
+   做冷色晕染用的，落在白背景上就成了一片蓝雾，这里全部换成纯黑的低透明度。 */
+body:not([data-ds-dark-theme]) .plt-form-wrap::after{background:rgba(0,0,0,.10);filter:blur(11px)}
+body:not([data-ds-dark-theme]) .plt-composer{
+  /* 浅色下不要顶部那道蓝光（深色主题里它是「顶部受光」，白卡上只会像一块蓝污渍），
+     也不要有方向性的径向渐变 —— 只保留下部一点点极淡的冷灰，让卡片有一点体积感。 */
+  background:
+    linear-gradient(180deg,rgba(255,255,255,0) 0%,rgba(240,242,245,.55) 100%),
+    linear-gradient(180deg,#ffffff 0%,#fdfdfe 100%);
+  border-color:rgba(20,40,70,.24);
+  /* 浅色下不要内阴影：白卡上叠 inset 会脏成一圈灰，只留向外的柔和投影（中性灰）。 */
+  box-shadow:0 1px 2px rgba(0,0,0,.05),0 8px 18px -10px rgba(0,0,0,.14),0 22px 42px -24px rgba(0,0,0,.12);
+}
+body:not([data-ds-dark-theme]) .plt-composer:hover{border-color:rgba(20,40,70,.22);box-shadow:0 1px 2px rgba(0,0,0,.07),0 12px 24px -10px rgba(0,0,0,.17),0 28px 50px -26px rgba(0,0,0,.14)}
+body:not([data-ds-dark-theme]) .plt-composer:focus-within{border-color:var(--dsw-alias-border-accent,#2f6fd0);box-shadow:0 1px 2px rgba(0,0,0,.05),0 16px 30px -10px rgba(0,0,0,.15),0 34px 60px -28px rgba(0,0,0,.12),0 0 0 3px rgba(20,40,70,.10)}
+/* 聚焦时的顶部渐隐原本是蓝色光带，浅色下换成中性的白→透明，只做「顶面被照亮」的暗示。 */
+body:not([data-ds-dark-theme]) .plt-composer::before{background:linear-gradient(180deg,rgba(255,255,255,.9),rgba(255,255,255,0) 52%)}
+body:not([data-ds-dark-theme]) .plt-composer .plt-input::placeholder{color:var(--dsw-alias-label-tertiary,#98a1ad)}
+body:not([data-ds-dark-theme]) .plt-composer .plt-chip{background:rgba(15,30,60,.05);border-color:rgba(15,30,60,.23);color:var(--dsw-alias-label-secondary,#4a5563)}
+body:not([data-ds-dark-theme]) .plt-composer .plt-chip:hover:not(:disabled){background:rgba(15,30,60,.09);color:var(--dsw-alias-label-primary,#1f2328)}
+/* 选中态：浅色下直接给实心品牌蓝底 + 白字白图标（原来是淡蓝底 + 蓝字，
+   放在浅色卡片上对比太弱，看不出「已经被选中」）。 */
+body:not([data-ds-dark-theme]) .plt-chip.active{background:#17539e;border-color:#134a8c;color:#fff;box-shadow:0 1px 3px rgba(20,60,120,.28),0 0 0 1px rgba(23,83,158,.18)}
+body:not([data-ds-dark-theme]) .plt-chip.active:hover:not(:disabled){background:#1a60b6;border-color:#17539e;color:#fff}
+body:not([data-ds-dark-theme]) .plt-chip.active svg{opacity:1}
+/* 连接符：浅色下 label-caption 是 #adb2b8，白底上小符号几乎看不见，压深一档。 */
+body:not([data-ds-dark-theme]) .plt-op{color:#59606c;opacity:.75}
+
+/* —— 分组卡片：黑投影换成偏蓝的淡投影 —— */
+/* 组头是 sticky 的，浅色下面板底色是白的，半透明会让滚动的内容透上来，压成接近实白。 */
+body:not([data-ds-dark-theme]) .plt-group-h{background:rgba(250,252,255,.94);border-color:rgba(20,40,70,.26)}
+body:not([data-ds-dark-theme]) .plt-group-h:hover{background:rgba(226,236,248,.96)}
+
+/* id=Kp86HX：浅色档的**待执行组**要能看出绿。
+ *
+ * 深色档的修法（提高 accent 透明度）在浅色档不管用 —— 上面那条
+ * `body:not([data-ds-dark-theme]) .plt-group-h{background:rgba(250,252,255,.94)}`
+ * 是**不透明的近白**，权重 [0,2,1]，而 `.plt-group-h{background:rgba(var(--plt-accent,140,140,140),.055)}`
+ * 只有 [0,1,0] —— 浅色主题下三组组头**都是同一片白**，accent 一个都看不见。
+ *
+ * 为什么不能简单改成半透明：组头是 sticky 的，浅色面板底下是白，
+ * 半透明会让滚动的内容透上来（这正是上面那条规则存在的原因）。
+ *
+ * 所以做法是「保持不透明，但把白色**染绿**」：
+ * 用极淡的绿调白（#f2fbf4 一档），既挡住滚动内容，又能看出这是绿色分组。
+ * 边框同理加深一档，让组的边界也带绿。 */
+body:not([data-ds-dark-theme]) .plt-group-todo .plt-group-h{
+  background:color-mix(in srgb, rgb(var(--plt-todo,46,160,67)) 8%, #ffffff);
+  border-color:rgba(var(--plt-todo,46,160,67),.38);
+}
+body:not([data-ds-dark-theme]) .plt-group-todo .plt-group-h:hover{
+  background:color-mix(in srgb, rgb(var(--plt-todo,46,160,67)) 13%, #ffffff);
+}
+/* 组容器：浅色下补一层淡绿边框 + 极淡绿底，让整块有实体感。 */
+body:not([data-ds-dark-theme]) .plt-group-todo{
+  /* id=Vrfpg7-B：边框透明度对齐带审核的 .3（原 .34）。
+     底色仍用 color-mix 4%（与 .plt-group.open 的 --plt-accent .035 同一浓度档，
+     只是浅色下用 color-mix 更容易与白底混合出稳定的观感）。 */
+  border-color:rgba(var(--plt-todo,46,160,67),.3);
+  background:color-mix(in srgb, rgb(var(--plt-todo,46,160,67)) 4%, #ffffff);
+}
+body:not([data-ds-dark-theme]) .plt-group-reviewed,
+body:not([data-ds-dark-theme]) .plt-group-unreviewed,
+body:not([data-ds-dark-theme]) .plt-group-todo{box-shadow:0 1px 2px rgba(16,32,64,.05),0 6px 16px -12px rgba(16,36,72,.22)}
+body:not([data-ds-dark-theme]) .plt-group-reviewed:hover,
+body:not([data-ds-dark-theme]) .plt-group-unreviewed:hover,
+body:not([data-ds-dark-theme]) .plt-group-todo:hover{box-shadow:0 1px 3px rgba(16,32,64,.07),0 10px 22px -14px rgba(16,36,72,.26),0 0 18px -12px rgba(var(--plt-accent,140,140,140),.5)}
+body:not([data-ds-dark-theme]) .plt-group.open{box-shadow:0 2px 4px rgba(16,32,64,.07),0 16px 34px -18px rgba(16,36,72,.26),0 0 0 1px rgba(var(--plt-accent,140,140,140),.12)}
+/* id=239：浅色下收起态的「干活中」流光。深色那套是往黑底上打亮光，浅底上反过来 ——
+   外发光要淡（白底上重投影会糊），描边要实（对比度参考 id=227 的 1.5:1 门槛），
+   扫过的那道高光保留 accent 本色 + 一段近白，走起来才看得见。 */
+/* 注意 background 是简写，会把基础规则里的 background-size:240% 一起重置回 auto ——
+   那样 background-position 动画就没得走（光带会静止）。所以这里必须把尺寸与重复方式补回来。 */
+@media (prefers-reduced-motion: reduce){}
+
+/* —— 条目底色：白色半透明 → 极淡的深色，浅底下才看得见边界 —— */
+body:not([data-ds-dark-theme]) .plt-item{background:var(--dsw-alias-bg-primary,#fff)}
+body:not([data-ds-dark-theme]) .plt-group-body .plt-item{background:rgba(var(--plt-accent,140,140,140),.055);border-color:rgba(var(--plt-accent,140,140,140),.32)}
+/* id=227：卡片头与正文之间的分割线（基础样式是 accent@.14，白底上几乎看不见）。 */
+body:not([data-ds-dark-theme]) .plt-group-body .plt-body{border-top-color:rgba(var(--plt-accent,140,140,140),.34)}
+
+/* —— 文字在浅底上要压深，不能沿用深色主题的「提亮」 —— */
+body:not([data-ds-dark-theme]) .plt-head:hover .plt-name{color:var(--dsw-alias-label-primary,#141a22)}
+/* id=85-B：徽标文字与深色段统一改用 --plt-todo-fg（浅色 9.11:1）。
+   原来 .86 透明度是 5.11:1，虽达标但深浅两段用了不同手法；
+   统一成 fg 变体后两边都是"直接给一个能读的颜色"，不再靠调透明度凑对比。 */
+body:not([data-ds-dark-theme]) .plt-group-todo .plt-tag.type{color:rgb(var(--plt-todo-fg,187,247,208));border-color:rgba(var(--plt-todo,46,160,67),.3)}
+/* id=Vrfpg7-A：浅色主题下「卡片浮出绿底」的对应做法。
+ *
+ * 深色那套是「白色 .08 叠在绿上」，浅色这里不能照抄 ——
+ * 浅色的组容器本来就接近白（color-mix 4% 绿 + 白 = rgb(246,249,247)），
+ * 再叠白只会更白，差不到 10，卡片反而更糊。
+ *
+ * 浅色下改用**纯白卡 + 更实的绿边**：白纸片压在淡淡的绿底上，
+ * 层次靠"纯白 vs 近白绿"和那条绿边走。悬停时加一点极淡的绿晕，
+ * 与深色那边"悬停更亮"的手感对齐（这边是"更绿一点"）。 */
+body:not([data-ds-dark-theme]) .plt-group-todo .plt-item{
+  background:#ffffff;
+  /* id=Vrfpg7-B：边框透明度对齐带审核的 .18（原 .34）。 */
+  border-color:rgba(var(--plt-todo,46,160,67),.18);
+  /* id=Vrfpg7-C：浅色下同样去掉那块 20px 内发光。
+     通用规则里 `body:not(...) .plt-group-body .plt-item` 只覆盖了 background/border，
+     没覆盖 box-shadow —— 深色那条 inset 20px 会**原样延续到浅色**，
+     在白卡上摊成一块灰影。这里显式收敛成 1px 极淡内描边。 */
+  box-shadow:inset 0 0 0 1px rgba(var(--plt-todo,46,160,67),.06);
+}
+body:not([data-ds-dark-theme]) .plt-group-todo .plt-item:hover{
+  /* 4% 与组容器同色 → 悬停后卡片"消失"进组底（实测差 0）。
+     用 8% 才是"比组底更绿一档"，看得出响应。
+     id=Vrfpg7-B：边框同步对齐（.52 → .3，与深色那边同一档）。 */
+  background:color-mix(in srgb, rgb(var(--plt-todo,46,160,67)) 8%, #ffffff);
+  border-color:rgba(var(--plt-todo,46,160,67),.3);
+}
+body:not([data-ds-dark-theme]) .plt-group-todo .plt-group-count{background:rgba(var(--plt-todo,46,160,67),.10);color:rgb(var(--plt-todo-fg,187,247,208));border-color:rgba(var(--plt-todo,46,160,67),.26)}
+/* id=358 / id=368：浅色态的 .plt-tag.reviewed 与 .plt-tag.unreviewed 随节点一并删除
+   （这两个组里不再画状态徽标）。深色那侧同步删掉了，两边保持对称。
+   id=401：待执行那档的文字标签也随节点删除。
+   id=407：随后连代替它的空心圆点也移除了（待执行不再画状态标记），
+   所以这里既没有文字徽标的浅色覆盖、也不需要圆点的浅色覆盖。 */
+/* id=233「已中断」：与 id=228 给「待审核」定的琥珀同一族，但底色更浅一档 ——
+   待审核是「干完了等人看」，已中断是「没干完等人续」，两者不该看起来一样重。 */
+/* mBSaIn：随深色段一起由琥珀改紫（白底上用更深的 #5b21b6，8.98:1）。 */
+body:not([data-ds-dark-theme]) .plt-tag.interrupted{background:rgba(91,33,182,.10);color:#5b21b6;border-color:rgba(91,33,182,.52)}
+body:not([data-ds-dark-theme]) .plt-tag.failed{background:rgba(180,60,50,.10);color:#8a2e28;border-color:rgba(180,60,50,.45)}
+/* id=226：基础样式是 rgba(var(--plt-accent,140,140,140),.85)，浅色下这条透明度会把文字再冲淡一层
+   （待执行组只剩 3.59:1）。浅色一律用实色，悬停反色那条保持原样。 */
+body:not([data-ds-dark-theme]) .plt-copy-btn{color:rgba(var(--plt-accent,140,140,140),1);border-color:rgba(var(--plt-accent,140,140,140),.32)}
+body:not([data-ds-dark-theme]) .plt-copy-btn:hover{background:rgba(var(--plt-accent,140,140,140),.12);border-color:rgba(var(--plt-accent,140,140,140),.5);color:var(--dsw-alias-label-primary,#141a22)}
+body:not([data-ds-dark-theme]) .plt-copy-btn:disabled:hover{color:rgba(var(--plt-accent,140,140,140),1)}
+body:not([data-ds-dark-theme]) .plt-copy-btn.done{background:rgba(34,150,70,.12);border-color:rgba(34,150,70,.45);color:#116b36}
+/* id=382：浅色态的「通过」图标按钮。
+   id=392：原来这两条覆盖**已删除**，因为「通过」图标改成走本组的 --plt-accent 了。
+   浅色下待审核组的 --plt-accent 是 138,95,6（本节上面那行 remap），
+   所以深色那条规则取到的自动就是深琥珀。
+
+   id=404：**但 hover 态必须在这里补回来** —— 这是「任务 45 没改到」的真正原因。
+   深色那侧的 hover 是 '.plt-icon-btn.plt-pass-icon:hover:not(:disabled)'，
+   类级权重 3（2 类 + :hover）、元素级 0。
+   而本节上面有一条浅色基础规则：
+
+     body:not([data-ds-dark-theme]) .plt-btn:hover:not(:disabled){background:…灰…}
+
+   它的类级权重也是 3（属性 + 类 + :hover），但**多一个元素 'body'**，
+   于是它稳压深色那条 —— 结果浅色主题下 hover 出来的是一层中性灰底，
+   白图标压灰底，既不是「白字黄底」，也看不出是黄。
+   深色主题没有这条 body 前缀的规则，所以在深色下是好的 ——
+   这就是「只在某种主题下没改到」的典型表现。
+
+   修法：在浅色这一侧再写一条**同结构、含 body 前缀**的规则。
+   权重变成「属性 + 2 类 + :hover = 4 + 元素 1」，高于基础那条的 3 + 1，
+   顺序上又排在它之后，双重保证胜出。
+   内容与深色那条完全一致（黄底 + 26% 压暗 + 白图标），
+   只是把变量换成本节已 remap 的 --plt-accent 深琥珀 —— 白字压深底约 7.8:1。 */
+body:not([data-ds-dark-theme]) .plt-icon-btn.plt-pass-icon:hover:not(:disabled){background-color:rgba(var(--plt-accent,138,95,6),1);background-image:linear-gradient(rgba(0,0,0,.26),rgba(0,0,0,.26));border-color:rgba(var(--plt-accent,138,95,6),1);color:#fff}
+
+/* —— 正在执行：浅底上把强度压到一半，绿色内阴影才不会糊成一块绿 —— */
+/* —— 详情区：代码块 / 备注 在浅底下改用更淡的着色 —— */
+body:not([data-ds-dark-theme]) .plt-plan{background:var(--dsw-alias-bg-tertiary,#f4f6f9)}
+body:not([data-ds-dark-theme]) .plt-group-body .plt-plan{background:rgba(var(--plt-accent,140,140,140),.06);border-color:rgba(var(--plt-accent,140,140,140),.32)}
+body:not([data-ds-dark-theme]) .plt-group-body .plt-note{background:rgba(var(--plt-accent,140,140,140),.045);border-left-color:rgba(var(--plt-accent,140,140,140),.5)}
+body:not([data-ds-dark-theme]) .plt-note{border-left-color:var(--dsw-alias-border-accent,#2f6fd0)}
+body:not([data-ds-dark-theme]) .plt-source{color:#4a5261;background:rgba(96,106,122,.05);border-color:rgba(96,106,122,.34)}
+body:not([data-ds-dark-theme]) .plt-del{color:#c0392b;border-color:rgba(192,57,43,.32)}
+/* 「审核通过」的浅色特化随 id=193 一起消失：现在它就是 .plt-copy-btn，
+ * 已有 body:not([data-ds-dark-theme]) .plt-copy-btn:hover / .done 两条覆盖接管，不需要额外的。 */
+body:not([data-ds-dark-theme]) .plt-err{background:rgba(192,57,43,.08);border-color:rgba(192,57,43,.3);color:#a93226}
+body:not([data-ds-dark-theme]) .plt-input{background:var(--dsw-alias-bg-primary,#fff);color:var(--dsw-alias-label-primary,#141a22);border-color:rgba(20,40,70,.24)}
+/* id=405：草稿编辑框的浅色覆盖（白底 + 绿色描边 + 聚焦淡绿光）已随草稿模式删除。 */
+/* 弹窗盒：与页面底同为纯白，只靠遮罩会显得「浮不起来」，因此描边抬到 1.85:1 并补三层阴影（近距贴边 + 中距扩散 + 远距氛围）。 */
+body:not([data-ds-dark-theme]) .plt-dialog{background:var(--dsw-alias-bg-primary,#fff);border-color:rgba(20,40,70,.30);box-shadow:0 1px 2px rgba(16,32,64,.10),0 10px 24px -6px rgba(16,32,64,.20),0 28px 56px -18px rgba(20,40,80,.24)}
+/* 弹窗遮罩：压暗 38.5%（原 46.9%），既压住底页又不过度发灰，白弹窗靠 1.58 的底差 + 描边 + 三层阴影分离。 */
+body:not([data-ds-dark-theme]) .plt-mask{background:rgba(20,32,56,.22)}
+
+/* —— 浅色下的次要文字：caption 在浅底上只有 2:1 出头，12.5px 会糊成一片 ——
+   统一压到 bluish-700 一档（#61666b 附近），小字才有可读的对比度。 */
+body:not([data-ds-dark-theme]) .plt-id{color:#5f6672;opacity:1}
+/* id=179 浅色：label-caption 在白底上太淡（#adb2b8），跟 .plt-id 一样压深一档。 */
+body:not([data-ds-dark-theme]) .plt-dur{color:#5f6672;opacity:1}
+body:not([data-ds-dark-theme]) .plt-sec-h{color:#59606c}
+/* 深色那条 hover 规则（.plt-sec-toggle:hover .plt-sec-h，特异度 (0,3,0)）比上面这行高，
+   不补一条就会在白底上把标题刷成近白色（var 兜底 #e8e8e8）。 */
+body:not([data-ds-dark-theme]) .plt-sec-toggle:hover .plt-sec-h{color:#2b3240}
+body:not([data-ds-dark-theme]) .plt-sec-toggle .plt-sec-caret{color:#7a828e}
+body:not([data-ds-dark-theme]) .plt-meta{color:#59606c}
+body:not([data-ds-dark-theme]) .plt-group-count{color:#59606c}
+/* id=275：拆解批次的层级线在白底上要压深一档，否则 2px 的 accent 半透明线和
+   「小横钩」几乎看不见；父行的强调竖杠同理，浅色下用不透明的 accent。 */
+body:not([data-ds-dark-theme]) .plt-kids-list{border-left-color:rgba(var(--plt-accent,140,140,140),.34)}
+body:not([data-ds-dark-theme]) .plt-kid::before{background:rgba(var(--plt-accent,140,140,140),.40)}
+body:not([data-ds-dark-theme]) .plt-kid:hover::before{background:rgba(var(--plt-accent,140,140,140),.72)}
+body:not([data-ds-dark-theme]) .plt-item.plt-parent > .plt-head::before{background:rgba(var(--plt-accent,140,140,140),.72)}
+body:not([data-ds-dark-theme]) .plt-item.plt-parent.open > .plt-head::before{background:rgba(var(--plt-accent,140,140,140),1)}
+body:not([data-ds-dark-theme]) .plt-kid{background:rgba(15,30,60,.028);border-color:rgba(20,40,70,.14)}
+body:not([data-ds-dark-theme]) .plt-kid:hover{background:rgba(15,30,60,.048);border-color:rgba(var(--plt-accent,140,140,140),.42)}
+/* id=361：子任务编号胶囊在浅底上要压深一档 —— 深色那条吃的是 accent 的 alpha
+   叠加，白底上会淡成一条看不清的小方块。文字用 bluish-700（与 .plt-id 同色阶），
+   底色/描边把 accent 的 alpha 提上去但不换色相，两套主题仍是同一族视觉。 */
+body:not([data-ds-dark-theme]) .plt-kid-code{color:#17559c;background:rgba(var(--plt-accent,140,140,140),.12);border-color:rgba(var(--plt-accent,140,140,140),.30)}
+body:not([data-ds-dark-theme]) .plt-kid-done .plt-kid-code{color:#5f6672;background:rgba(var(--plt-accent,140,140,140),.07);border-color:rgba(20,40,70,.16)}
+body:not([data-ds-dark-theme]) .plt-kid-note{color:#59606c}
+/* id=317：「已做的子任务」（id=316）在浅色下要逐项对齐 —— 深色那套吃的是
+   rgba(255,255,255,.xx) 与 dsw 变量，白底上要么看不见、要么把字刷淡到读不清。
+   这里只用两种既有色阶：bluish-700（文字）与 accent 的 alpha（装饰），不引入新色值。 */
+body:not([data-ds-dark-theme]) .plt-kid.plt-kid-done{background:rgba(15,30,60,.045);border-color:rgba(20,40,70,.10)}
+body:not([data-ds-dark-theme]) .plt-kid.plt-kid-done:hover{background:rgba(15,30,60,.075);border-color:rgba(var(--plt-accent,140,140,140),.34)}
+body:not([data-ds-dark-theme]) .plt-kid-done .plt-kid-name{color:#3c4653}
+body:not([data-ds-dark-theme]) .plt-kid-done .plt-kid-plan{color:#4a5563;opacity:1}
+body:not([data-ds-dark-theme]) .plt-kid-done .plt-kid-note{color:#59606c;opacity:1}
+body:not([data-ds-dark-theme]) .plt-kid-done::before{background:rgba(var(--plt-accent,140,140,140),.24)}
+body:not([data-ds-dark-theme]) .plt-kid-check{color:#17559c;background:rgba(var(--plt-accent,140,140,140),.14)}
+body:not([data-ds-dark-theme]) .plt-body.plt-body-parent{border-top-color:rgba(var(--plt-accent,140,140,140),.26)}
+/* id=240：收起态「正在执行」提示。深色那条吃的是 rgba(var(--plt-accent,140,140,140),.95)，
+   浅色下四组 accent 已压深（id=226/228），alpha 再拉满一档到这里：不放白底上会发灰。 */
+body:not([data-ds-dark-theme]) .plt-group-run{color:rgba(var(--plt-accent,140,140,140),1)}
+/* ── 「完成后暂停」开关 · 浅色（id=76-B 重写）──────────────────────────────
+ *
+ * 本步要求「一律引用主题变量，不用硬编码颜色」，所以原来那几处
+ * `#59606c` / `#8b929c` / `rgba(20,40,70,.22)` 全部换掉：
+ *   · 文字 → --dsw-alias-label-caption（宿主主题在浅色下自己会给深灰）
+ *   · 边框 → --dsw-alias-border-secondary
+ *   · 圆点 → --dsw-alias-label-tertiary（比 caption 再淡一档，天然是"关"的观感）
+ *
+ * 只保留真正**必须覆盖**的部分：白底上 .45~.5 的 accent 透明度会偏淡，
+ * hover / active / on 的描边要抬到 .55~.7 才看得清 —— 这不是"另一套配色"，
+ * 而是同一支 --plt-accent 在浅底上需要的不同透明度，属于主题内调整。
+ * 底色（background）也用 accent 的低透明度，与文字同源，不会撞色。
+ */
+body:not([data-ds-dark-theme]) .plt-auto-pause{
+  /* 回退值取 #6b7280 而不是沿用深色那条的 #9a9a9a ——
+     实测 #9a9a9a 在纯白底上只有 2.81:1，远低于 4.5；#6b7280 是 4.83:1。
+     宿主有 --dsw-alias-label-caption 时用不到回退，但没有该变量的环境
+     （或被宿主换成浅色值）就会踩到，所以回退值本身也要能读。 */
+  color:var(--dsw-alias-label-caption,#6b7280);
+  border-color:var(--dsw-alias-border-secondary,rgba(20,40,70,.22));
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause .plt-dot{
+  background:var(--dsw-alias-label-tertiary,#8b929c);
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause:hover{
+  border-color:rgba(var(--plt-accent,140,140,140),.6);
+  background:rgba(var(--plt-accent,140,140,140),.08);
+  color:rgba(var(--plt-accent,140,140,140),1);
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause:active{
+  border-color:rgba(var(--plt-accent,140,140,140),.72);
+  background:rgba(var(--plt-accent,140,140,140),.15);
+  color:rgba(var(--plt-accent,140,140,140),1);
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause:focus-visible{
+  outline-color:rgba(var(--plt-accent,140,140,140),.8);
+}
+/* id=wZIKdd：浅色档开态也改为黄色（--plt-run 在浅色下是深黄 #a16207，白底 4.92:1）。 */
+body:not([data-ds-dark-theme]) .plt-auto-pause.on{
+  color:rgba(var(--plt-run,255,214,10),1);
+  border-color:rgba(var(--plt-run,255,214,10),.55);
+  background:rgba(var(--plt-run,255,214,10),.1);
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause.on .plt-dot{
+  /* 浅色档 --plt-run 已压深（#a16207），白底上够清楚。 */
+  background:rgb(var(--plt-run,255,214,10));
+  box-shadow:0 0 0 2px rgba(var(--plt-run,255,214,10),.2);
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause.on:hover{
+  border-color:rgba(var(--plt-run,255,214,10),.7);
+  background:rgba(var(--plt-run,255,214,10),.17);
+}
+/* 禁用态 · 浅色（id=76-C）。
+   深色那几条已经把所有态（含 .on）重置成"灰、空心、无底色"，
+   这里要把**灰色本身**换成浅色档（白底上用深色那条的浅灰会看不见），
+   同时补上 opacity / cursor —— 深色里那条 `.plt-auto-pause:disabled` 只管
+   深色档，浅色若只写组合选择器就会漏掉"单纯 disabled"这一条。 */
+body:not([data-ds-dark-theme]) .plt-auto-pause:disabled{
+  opacity:.45;
+  cursor:default;
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause:disabled,
+body:not([data-ds-dark-theme]) .plt-auto-pause:disabled:hover,
+body:not([data-ds-dark-theme]) .plt-auto-pause:disabled:active,
+body:not([data-ds-dark-theme]) .plt-auto-pause.on:disabled,
+body:not([data-ds-dark-theme]) .plt-auto-pause.on:disabled:hover{
+  background:transparent;
+  border-color:var(--dsw-alias-border-secondary,rgba(20,40,70,.22));
+  color:var(--dsw-alias-label-caption,#6b7280);
+  outline:none;
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause:disabled .plt-dot,
+body:not([data-ds-dark-theme]) .plt-auto-pause.on:disabled .plt-dot{
+  background:var(--dsw-alias-label-tertiary,#8b929c);
+  box-shadow:none;
+}
+/* 上限下拉（id=190）：浅色下白底，深色那条 #1c1f24 的 option 底色要翻回来；
+   箭头的 data-uri 是写死的中灰，浅色下偏淡，换一版深灰的图。
+   底色仍走组自身的 --plt-accent（浅色档已审核是 96,106,122），只把透明度提一档，
+   免得在白底上几乎看不见这个控件。 */
+body:not([data-ds-dark-theme]) .plt-foot{color:#6a7280;opacity:1}
+body:not([data-ds-dark-theme]) .plt-empty{color:#59606c}
+/* 空组提示：深色下靠 opacity:.8 压暗，浅色下会直接糊掉，改成实色 + 图标稍亮。 */
+body:not([data-ds-dark-theme]) .plt-group-empty{color:#59606c;opacity:1}
+body:not([data-ds-dark-theme]) .plt-group-empty svg{opacity:.75}
+body:not([data-ds-dark-theme]) .plt-caret,body:not([data-ds-dark-theme]) .plt-grip{color:#646b77}
+/* id=226：还有三处 caption 直接吃宿主的 --dsw-alias-label-caption，浅色下是 #adb2b8
+   （白底 2.13:1、卡片底 1.98:1），小字基本看不见。统一压到 bluish-700 一档。
+   .plt-pin 只在 hover 时才显现，但显现的那一下必须看得清，所以基线色也要给。 */
+body:not([data-ds-dark-theme]) .plt-sec-hint{color:#646b77}
+body:not([data-ds-dark-theme]) .plt-pin{color:#646b77}
+body:not([data-ds-dark-theme]) .plt-tag.type{color:#59606c;border-color:rgba(20,40,70,.18)}
+body:not([data-ds-dark-theme]) .plt-check.locked{opacity:.72}
+/* 「· 模型回填」是 .65 透明的小字，浅底下几乎化掉，改成实色深灰。 */
+body:not([data-ds-dark-theme]) .plt-check.locked span::after{opacity:1;color:#6a7280}
+/* placeholder 在浅底上原本是 #98a1ad，压到 bluish-600 一档才看得清。
+   同样要 !important：主题包给所有 input::placeholder 打了浅白蓝的 !important。 */
+body:not([data-ds-dark-theme]) .plt-composer .plt-input::placeholder{color:#6b7280!important;opacity:1!important}
+/* 弹窗里的行内代码：--dsw-alias-bg-tertiary 在浅色下不存在，会落到深色兜底上，
+   深底深字直接看不见，这里给出浅色专用的淡灰底。 */
+body:not([data-ds-dark-theme]) .plt-dialog code{background:rgba(20,40,70,.06);color:#333a45}
+/* 「开始干活」：白字压在浅蓝上对比不够，浅色下把填充压深一档（#1a60b6 一档）。 */
+body:not([data-ds-dark-theme]) .plt-bulk-go{color:#fff;border-color:rgba(20,70,130,.9);background:linear-gradient(180deg,#2b7ada,#1a60b6);box-shadow:0 1px 2px rgba(0,0,0,.14),0 0 12px -4px rgba(30,90,170,.55)}
+body:not([data-ds-dark-theme]) .plt-bulk-go:hover:not(:disabled){background:linear-gradient(180deg,#3486e6,#1f6fd0);box-shadow:0 1px 3px rgba(0,0,0,.18),0 0 18px -3px rgba(30,100,190,.6)}
+/* 干活中的半透明底 + 白字 = 白字消失，浅色下改成深蓝字。 */
+body:not([data-ds-dark-theme]) .plt-bulk-go.is-working{color:#17539e;background:rgba(31,111,208,.14);border-color:rgba(31,111,208,.4)}
+body:not([data-ds-dark-theme]) .plt-bulk-go.is-working:hover:not(:disabled){background:rgba(31,111,208,.14)}
+body:not([data-ds-dark-theme]) .plt-bulk-go:disabled{opacity:1;color:#77808c;background:rgba(20,40,70,.07);border-color:rgba(20,40,70,.12);box-shadow:none}
+body:not([data-ds-dark-theme]) .plt-bulk-go.is-working:disabled{color:#17539e;background:rgba(31,111,208,.14);border-color:rgba(31,111,208,.38)}
+/* id=226：实心胶囊在浅色下的两处对比度修补。
+   ①「全部通过 / 批量转待执行」原来用近黑的 #1b1200 压在琥珀/草绿强调色上，
+      浅色档压深后底色变深（琥珀 138,95,6、草绿 17,107,54），近黑字只剩 3.4:1，
+      换成白字后 4.70 / 5.44，两个强调色都过线。
+   ②「批量删除」的红色是给深底调的 rgba(.92/.82) 半透明，浅底上合成出来只有 3.73:1，
+      浅色改成实心红（#c0392b → #a83232，白字 5.98）。 */
+/* id=71-E：这里原先是两条选择器并列 —— 批量「通过」与批量「转待执行」两颗按钮。
+   71 组之前清理草稿模式时删掉了后者的选择器，却没删前面的逗号，
+   于是前一条悬空（逗号后紧跟注释和另一条规则）——
+   结果下面那条 color:#fff 失去了选择器（被并进后续规则），浅色下按钮字色悄悄回退。
+   现在把这批白字规则合并成一条完整规则。
+   （按本项目规矩：注释里提到类名不写前导点，否则 dead-css 会当成一处“定义”。） */
+body:not([data-ds-dark-theme]) .plt-bulk-pass{color:#fff}
+/* 底色也要给：基础样式是 .98/.82 的半透明渐变，叠在浅色批量条上算出来只有 3.16:1，
+   浅色下改成 1/.9 的实心渐变（琥珀 5.08、草绿 5.87），保留上下渐变的层次感。 */
+body:not([data-ds-dark-theme]) .plt-bulk-pass{background:linear-gradient(180deg,rgba(var(--plt-accent,140,140,140),1),rgba(var(--plt-accent,140,140,140),.9))}
+body:not([data-ds-dark-theme]) .plt-bulk-pass:hover:not(:disabled),
+body:not([data-ds-dark-theme]) .plt-bulk-del{
+  border-color:rgba(150,44,38,.85);
+  background:linear-gradient(180deg,#c0392b,#a83232);
+  box-shadow:0 1px 2px rgba(90,20,16,.22),0 0 12px -5px rgba(192,57,43,.7);
+}
+body:not([data-ds-dark-theme]) .plt-bulk-del:hover:not(:disabled){background:linear-gradient(180deg,#d94f43,#b83a30)}
+
+/* —— 复选框：浅色下原生 checkbox 会跟着 color-scheme 画成深灰实心块，
+   在白卡上就是「黑色的一坨」。这里在浅色下接管绘制（appearance:none），
+   自己画一个白底 + 细边框的方框，勾选后填蓝并叠一个白色对勾。
+   深色主题继续用原生绘制 + accent-color，一行不动。 */
+body:not([data-ds-dark-theme]) .plt-check input[type='checkbox'],
+body:not([data-ds-dark-theme]) .plt-pick input[type='checkbox'],
+body:not([data-ds-dark-theme]) .plt-bulk input[type='checkbox']{
+  -webkit-appearance:none;appearance:none;
+  box-sizing:border-box;margin:0;padding:0;
+  width:14px;height:14px;flex:0 0 auto;
+  border:1.5px solid rgba(20,40,70,.34);
+  border-radius:4px;
+  background-color:#fff;
+  cursor:pointer;
+  transition:background-color .12s ease,border-color .12s ease,box-shadow .12s ease;
+}
+body:not([data-ds-dark-theme]) .plt-bulk input[type='checkbox'],
+body:not([data-ds-dark-theme]) .plt-pick input[type='checkbox']{width:13.5px;height:13.5px}
+body:not([data-ds-dark-theme]) .plt-check input[type='checkbox']:hover:not(:disabled),
+body:not([data-ds-dark-theme]) .plt-pick input[type='checkbox']:hover:not(:disabled),
+body:not([data-ds-dark-theme]) .plt-bulk input[type='checkbox']:hover:not(:disabled){border-color:rgba(31,111,208,.72);box-shadow:0 0 0 3px rgba(47,111,208,.12)}
+body:not([data-ds-dark-theme]) .plt-check input[type='checkbox']:checked,
+body:not([data-ds-dark-theme]) .plt-pick input[type='checkbox']:checked,
+body:not([data-ds-dark-theme]) .plt-bulk input[type='checkbox']:checked{
+  border-color:#1f6fd0;
+  background-color:#1f6fd0;
+  background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.2 8.6l3.1 3.1L12.8 5' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:center;background-size:11px 11px;
+}
+/* 只读的「已执行」：勾选后是灰蓝的「已完成」色，不抢眼也不发黑。 */
+body:not([data-ds-dark-theme]) .plt-check.locked input[type='checkbox']:checked{background-color:#8e97a4;border-color:#8e97a4}
+/* 禁用且未勾选：浅灰虚化的空框。 */
+body:not([data-ds-dark-theme]) .plt-check input[type='checkbox']:disabled:not(:checked),
+body:not([data-ds-dark-theme]) .plt-pick input[type='checkbox']:disabled:not(:checked),
+body:not([data-ds-dark-theme]) .plt-bulk input[type='checkbox']:disabled:not(:checked){border-color:rgba(20,40,70,.16);background-color:#f4f6f9;cursor:default}
+body:not([data-ds-dark-theme]) .plt-check.locked input[type='checkbox']:disabled{cursor:not-allowed}
+/* 拆解遮罩的浅色形态：白底界面下用淡蓝雾 + 白卡片，避免整块发黑。 */
+body:not([data-ds-dark-theme]) .plt-split-mask{background:rgba(20,40,70,.16)}
+body:not([data-ds-dark-theme]) .plt-split-card{
+  border:1px solid rgba(20,40,70,.30);
+  background:linear-gradient(180deg,#ffffff,#f8fbff);
+  box-shadow:0 1px 2px rgba(16,32,64,.10),0 10px 22px -8px rgba(16,32,64,.20),0 30px 58px -24px rgba(20,40,80,.24),inset 0 1px 0 rgba(255,255,255,.92);
+  color:#20293a;
+}
+/* 浅色下转圈用深一档的蓝，白底上 #8ab0f5 会糊。 */
+body:not([data-ds-dark-theme]) .plt-split-card svg{color:#3a72c8}
+body:not([data-ds-dark-theme]) .plt-split-card .plt-split-hint{color:#5b6675}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【14】浅色 · 三组配色与组头
+ * 源：src/client/20-css/30-light.js 的分组配色段（id=79-C 已迁入 src/styles/）
+ * 深色：已审核 156,163,175 / 待审核 255,180,60 / 待执行 var(--plt-todo,46,160,67)（240,82,82）
+ * 浅色：已审核 96,106,122 / 待审核 138,95,6 / 待执行 var(--plt-todo,46,160,67)（185,28,28）
+ * （浅色值都压深过，为的是让 accent@1 的小字在白底上达到 4.5:1）
+ * id=78-B/C：待执行与执行中已改红色主题，组色统一走 01-base.css 的【1.5】变量，
+ *            这里不再写死任何绿色。
+ * ────────────────────────────────────────────────────────────────────────── 
+ * （规则已随【13】整段搬入 —— 源是同一个片段 30-light.js，不按视觉切分拆开。）
+ */
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【15】浅色 · 条目与详情
+ * 源：20-css/30-light.js 的条目/详情段
+ * 注：执行中（running）的独立覆盖已按 id=4-A 全部删除，不再有专属外观。色。
+ * ────────────────────────────────────────────────────────────────────────── 
+ * （规则已随【13】整段搬入 —— 源是同一个片段 30-light.js，不按视觉切分拆开。）
+ */
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【16】浅色 · 批量区与胶囊
+ * 源：20-css/30-light.js 的后段
+ * ⚠ 已知易错点：并列选择器里删掉一个名字时要连逗号一起删，
+ *   否则前一条规则的声明会失去选择器（id=71-E 踩过一次：
+ *   批量「通过」按钮的 color:#fff 就是这样丢的）。
+ * ────────────────────────────────────────────────────────────────────────── 
+ * （规则已随【13】整段搬入 —— 源是同一个片段 30-light.js，不按视觉切分拆开。）
+ */
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【17】浅色 · 动效降级
+ * 源：20-css/30-light.js 里的 animation 覆盖（1 条）
+ * 与 prefers-reduced-motion 的降级不是一回事：这里是浅色下的视觉微调。
+ * ⚠ 本段是全项目唯一在浅色侧写 animation 的地方（79-D 需确认它排在
+ *   对应 @keyframes 之后、且不与 02 段里的同名声明冲突）。
+ * ────────────────────────────────────────────────────────────────────────── 
+ * （规则已随【13】整段搬入 —— 源是同一个片段 30-light.js，不按视觉切分拆开。）
+ */
+
+/* ============================================================
+ * 分段索引（便于对照源码）
+ * ============================================================
+ *  01. 基础与外壳（变量、面板、顶栏、遮罩、tooltip、输入区）            112 条 ← src/styles/01-base.css
+ *  02. 条目与内容（条目、分组、详情、子任务、批量区、胶囊）                279 条 ← src/styles/02-content.css
+ *  03. 主题覆盖 · 浅色（必须最后）                           141 条 ← src/styles/03-theme.css
+ *
+ * 合计 532 条规则 / 3 个模块。
+ * ============================================================ */

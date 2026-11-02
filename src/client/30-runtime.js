@@ -198,16 +198,16 @@
      * 让右侧一眼能区分「还没轮到」和「正在跑」（颜色与流光继续承担视觉强调）。
      * 执行完成后的两种审核态（待审核 / 已审核）直接由这里给出，不再叠第二个标签。
      */
-    function statusOf(item, impliedRunning = false) {
+    function statusOf(item, impliedRunning = false, delivered = undefined) {
       // id=274：父节点（拆解批次）自己没有执行状态 —— 它的 execute / review 只是容器
       // 标记，真正在跑的是 children。所以父级的状态按子任务**聚合**：
       // 只要有一条在跑就是「执行中」，整批做完未审是「待审核」，整批审完是「已审核」，
       // 其余（还没轮到 / 有失败 / 有中断）才按待执行那一档的既有规则给。
       const kids = Array.isArray(item.children) ? item.children : []
       if (kids.length > 0) {
-        // 草稿优先：整批被标成草稿时，即使子任务都做完了也还是草稿（不能因为
-        // 下面那条「整批做完 = 待审核」把草稿洗成待审核）。
-        if (item.draft === true) return { key: 'draft', label: '草稿' }
+        // id=405：草稿分组已从界面移除，「草稿优先」这条判定随之删除。
+        // 即使数据里还留着 draft:true（历史条目），也不再产出 'draft' 状态 ——
+        // 否则卡片会画出一枚界面上已经没有对应分组的「草稿」徽标。
         // id=344：整批做完、但还有子任务没审 —— 这条父是「待审核」，不是「待执行」。
         // 队列侧已经不把它当可执行任务（正文为空），面板这一侧也必须同口径，
         // 否则会出现「点了开始，什么都没发生」的观感。
@@ -217,7 +217,9 @@
           && !kids.every((kid) => kid?.review === true)) {
           return { key: 'unreviewed', label: '待审核' }
         }
-        const states = kids.map((child) => statusOf(child))
+        // id=89-D：子任务也要带上同一份 delivered ——「执行中」的判定对父子一视同仁，
+        // 否则父聚合出来的状态与子行自己显示的状态会打架。
+        const states = kids.map((child) => statusOf(child, false, delivered))
         if (states.some((s) => s.key === 'running')) return { key: 'running', label: '执行中' }
         if (states.every((s) => s.key === 'reviewed')) return { key: 'reviewed', label: '已审核' }
         if (states.every((s) => s.key === 'reviewed' || s.key === 'unreviewed')) return { key: 'unreviewed', label: '待审核' }
@@ -227,7 +229,7 @@
         if (impliedRunning === true) return { key: 'running', label: '执行中' }
         return { key: 'todo', label: '待执行' }
       }
-      if (item.draft === true) return { key: 'draft', label: '草稿' }
+      // id=405：同上，草稿档已移除。draft 标记不再参与状态计算。
       if (item.execute === true) {
         return item.review === true
           ? { key: 'reviewed', label: '已审核' }
@@ -240,7 +242,26 @@
       // 失败的条目留在待执行组里，但不再显示成「执行中」，模型也不会再选它。
       if (item.failed === true) return { key: 'failed', label: '失败' }
       if (item.interrupted === true) return { key: 'interrupted', label: '已中断' }
-      if (typeof item.startedAt === 'string' && item.startedAt !== '') return { key: 'running', label: '执行中' }
+      // id=89-D：**「执行中」必须由派发记录派生，不能只看 startedAt。**
+      //
+      // 为什么：`startedAt` 会被故意保留下来（id=233，为了「继续 = 续做而不是重跑」），
+      // 所以任何"曾经开过工、后来没走完"的条目都会永远显示「执行中」——
+      // 用户看到的是「这一轮根本没派发，界面却在转圈」。
+      //
+      // 判据与宿主侧的 running.js 完全一致：
+      //   执行中 = 有 startedAt **且** 该 id 出现在这次的 delivered[] 里。
+      // 查不到就当作待执行（题面要求），而不是已中断 —— 「已中断」得由回填链路
+      // 明确写 interrupted 才算数，不能因为"查不到记录"就给人扣一顶中断的帽子。
+      //
+      // `delivered` 为 undefined 时（老版本宿主 / 测试）**退化成只信 startedAt**，
+      // 保持向后兼容：宁可多显示一个执行中，也不要在拿不到数据时把在跑的任务
+      // 显示成待执行导致重复点击开始。
+      if (typeof item.startedAt === 'string' && item.startedAt !== '') {
+        if (!Array.isArray(delivered)) return { key: 'running', label: '执行中' }
+        const wasDispatched = delivered.some((x) => String(x) === String(item.id))
+        if (wasDispatched) return { key: 'running', label: '执行中' }
+        // 派发记录里没有它 → 回落待执行（继续往下走，由后面的规则决定）
+      }
       // 模型刚开始干活、还没来得及把 startedAt 写进 plan.json 的这一小段：
       // 会话已经是 running 了，就把排在最前面的那条待执行按「执行中」显示，
       // 否则界面上会出现「AI 明明在跑，待执行里每条都写着待执行」的错位。
@@ -314,18 +335,19 @@
     /**
      * 提交时拼出最终写进 plan 的那段提示词（id=262）。
      *
-     * 三种模式的优先级与叠加规则收在这一个函数里，别处不再各拼各的：
-     * - 草稿：一律存用户原话（改写了就不是草稿了，转正/再编辑时再决定）；
+     * 叠加规则收在这一个函数里，别处不再各拼各的：
      * - 仅回答：前缀单独占一行（`仅回答：\n<正文>`）——以前是 `仅回答：当前任务：…`
      *   直接贴在一起，两个标签连成一串谁也读不懂；
      * - 深入：先过 {@link deepPrompt}（自带幂等与 CRLF 归一），再叠前缀。
      *
      * 前缀先剥后加，保证「一条提示词里最多一个前缀」：用户自己写着「仅回答：」
      * 又选了仅回答类型时，不会变成两个。
+     *
+     * id=405：原来这里还有一条 `draft` 短路分支（草稿一律存原话、不加前缀）。
+     * 草稿模式移除后没有任何调用方再传 draft，那条分支成了死代码 —— 已删。
      */
     function composePrompt(options) {
       const body = String(options?.text ?? '')
-      if (options?.draft === true) return body.trim()
       const prefix = typePrefix(options?.taskType)
       const raw = options?.deep === true ? deepPrompt(body) : body.replace(/\r\n?/g, '\n')
       if (prefix === '') return raw
@@ -377,9 +399,11 @@
         const area = document.createElement('textarea')
         area.value = value
         area.setAttribute('readonly', '')
-        area.style.position = 'fixed'
-        area.style.top = '-1000px'
-        area.style.opacity = '0'
+        // id=71-D：三处固定内联样式（position/top/opacity）收敛成一个类。
+        // 这个节点挂在 document.body 上（不在 .plt-root 里），
+        // 而 .plt-offscreen 的规则本身不依赖任何变量，所以全局定义是安全的
+        // —— 它不会命中宿主页面上的其它元素，因为类名是本插件专属前缀。
+        area.className = 'plt-offscreen'
         document.body.appendChild(area)
         area.select()
         const ok = document.execCommand('copy')

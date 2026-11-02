@@ -64,7 +64,7 @@
      * **必须挂在面板根里，不能挂 document.body**（id=252 联合回归抓到的真 bug）。
      * 两个后果，都只在真实页面上才显形：
      * 1. 颜色全在 `.plt-root` 上定义（05-tooltip-vars.js），挂 body 就出了变量作用域 ——
-     *    `var(--plt-tip-bg)` 解析成空，气泡变成透明底黑字、0 圆角无边框。
+     *    `var(--plt-tip-bg,rgba(34,42,56,.97))` 解析成空，气泡变成透明底黑字、0 圆角无边框。
      * 2. `tipPlace()` 给的坐标是「相对面板」的，而 body 下的 fixed 元素按视口定位 ——
      *    侧栏在窗口右侧时，气泡会整体偏出去一个侧栏偏移量。
      * 挂进面板根之后：变量在同一条链上，且 `.plt-root` 的 `container-type:size`
@@ -81,7 +81,8 @@
       el = document.createElement('div')
       el.className = 'plt-tip plt-tip--top'
       el.setAttribute('role', 'tooltip')
-      el.style.visibility = 'hidden'
+      // id=71-D：可见性改由 .is-hidden 类控制，不再逐条写 el.style.visibility。
+      el.classList.add('is-hidden')
       // 文字装在里层（id=251）：外层要留出 1px 边框与四支箭头的位置，
       // 高度夹紧只能作用在里层 —— 给外层加 overflow:hidden 会把箭头一并裁掉。
       const inner = document.createElement('div')
@@ -130,13 +131,25 @@
       const inner = tipInner(el)
       inner.textContent = body
       // 先落上方向类再量尺寸：max-width 与换行都跟方向无关，但箭头位置有关，量之前得让类名生效。
-      el.className = 'plt-tip plt-tip--top'
-      el.style.visibility = 'hidden'
+      // id=71-D：这里原来还有 visibility='hidden' 与 left/top='0px' 三行内联。
+      // 可见性改走 .is-hidden 类；但 left/top 的「测量前归零」**必须保留** ——
+      // 气泡是单例复用的（tipElement 里 querySelector 拿回同一个节点），
+      // 上一次显示时写下的 left/top 会残留在节点上。不归零的话，
+      // 下面那段「量到的位置 = 包含块原点」的换算基准就被上一次的坐标污染，
+      // 表现为气泡在连续 hover 不同目标时越飘越远。
+      // 这两个 0 是**运行时复位**，不是静态样式，所以仍用内联（CSS 里写了 0 反而会
+      // 把「未定位」和「已定位到原点」两种状态混成一种）。
+      el.className = 'plt-tip plt-tip--top is-hidden'
       el.style.left = '0px'
       el.style.top = '0px'
       const panel = panelEl.getBoundingClientRect()
       // 窄面板（侧栏被拖到 300px 以下）时，变量里的 320px 上限比面板还宽 ——
       // 那样气泡会横向探出面板。按面板实际宽度再夹一次（id=251）。
+      // id=71-D：下面这两处**保留内联**，因为值是运行时量出来的，CSS 表达不了：
+      //   · maxW 取决于面板实时宽度（侧栏可拖动）；
+      //   · maxHeight 取决于面板实时高度。
+      // CSS 里已有 max-width:var(--plt-tip-max-w,320px) 作为**上限兜底**，
+      // 这两行是在上限之内再按实际面板收一次，二者不冲突。
       const maxW = Math.max(120, panel.width - TIP_MARGIN * 2)
       el.style.maxWidth = `${Math.round(maxW)}px`
       // 极长文案（卡片名带整段计划正文）可能高过面板：夹住高度，否则气泡底边会探出去。
@@ -150,7 +163,10 @@
         { width: panel.width, height: panel.height },
         size,
       )
-      el.className = `plt-tip plt-tip--${place.side}`
+      // id=71-D：这里**必须**带上 is-hidden —— 整串 className 赋值会把上面刚加的
+      // is-hidden 一起冲掉，气泡就会在算好坐标之前先闪一下（在原位置可见）。
+      // 原先用内联 visibility 时不存在这个问题：style 与 className 互不干扰。
+      el.className = `plt-tip plt-tip--${place.side} is-hidden`
       // 气泡此刻还在 left/top = 0，量到的视口位置就是**包含块原点**。
       // 不靠猜 `.plt-root` 的 container-type 是否真把 fixed 收成了自己的包含块
       // （各引擎/层叠上下文下并不一致），直接量一次再换算：
@@ -158,12 +174,19 @@
       //   包含块是视口 → base.left = 0，修正量正好是面板原点。
       // 少了这一步，侧栏不在窗口左上角时整块气泡会整体平移一个侧栏偏移（id=299）。
       // 量之前先把方向类带来的 3px 位移抵消掉：否则换成相反方向时那 3px 会翻倍成 6px 偏差。
-      el.style.transform = 'none'
+      // id=71-D：这三行原来是 transform='none' → 量 → transform=''。
+      // 改成加/去一个 .is-measuring 类（CSS 里把它置为 transform:none），
+      // 语义更清楚，也不用在 JS 里直接推样式字符串。
+      el.classList.add('is-measuring')
       const base = el.getBoundingClientRect()
-      el.style.transform = ''
+      el.classList.remove('is-measuring')
+      // id=71-D：left/top **保留内联** —— 它们是每次显示时按锚点位置算出来的
+      // （place 是纯函数 tipPlace 的结果，再叠加包含块原点修正 base/panel）。
+      // 这类「贴着目标走」的坐标不可能预先写成 CSS 规则。
       el.style.left = `${Math.round(place.left + (panel.left - base.left))}px`
       el.style.top = `${Math.round(place.top + (panel.top - base.top))}px`
-      el.style.visibility = ''
+      // 可见性交还给类：去掉 is-hidden 即显示（opacity 仍由 is-on 控制过渡）。
+      el.classList.remove('is-hidden')
       // 下一帧再加 is-on，让 opacity 从 0 过渡过去；同一帧设会跳过过渡直接显示。
       el.dataset.on = 'pending'
       requestAnimationFrame(() => {
@@ -179,7 +202,8 @@
       if (el === null) return
       el.classList.remove('is-on')
       el.dataset.on = 'no'
-      el.style.visibility = 'hidden'
+      // id=71-D：改成加 .is-hidden 类。
+      el.classList.add('is-hidden')
     }
 
     /** 从事件目标往上找最近的带 `data-tip` 的祖先（气泡本身不接事件，不会命中）。 */

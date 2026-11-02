@@ -1,0 +1,637 @@
+/* ============================================================================
+ * DSH「任务列表」插件样式 · 第 1/3 段：基础与外壳
+ * ============================================================================
+ *
+ * 本文件是 id=79 迁移的**权威源**（source of truth）。
+ * 早先样式只以字符串形式活在 `src/client/20-css/*.js` 的 `CSS_PARTS` 里；
+ * 79 组把规则逐条搬到这里，让 CSS 以 CSS 的方式被编辑、检查、复用。
+ *
+ * ── 三段式为什么这么切 ────────────────────────────────────────────────────
+ * 拆成 3 个文件而不是 13 个（对齐原片段），也不是 1 个（96KB 单体）：
+ *   · 切太少：单文件接近百 KB，diff 噪音大、编辑器索引慢；
+ *   · 切太碎：13 个文件之间大量「同特异度、后写者胜」的覆盖关系会被打散，
+ *     改一个颜色要翻 4 个文件才能确认没被覆盖 —— 反而比现在更难维护。
+ * 边界按**层叠作用域**划，不按原片段划：
+ *   01-base.css    基础与外壳（变量、面板、顶栏、遮罩、输入区）
+ *   02-content.css 条目与分组（条目、分组、详情、子任务、批量区）
+ *   03-theme.css   主题覆盖（浅色），必须最后
+ *
+ * ── 顺序是语义，不是排版偏好 ──────────────────────────────────────────────
+ * 02 里的条目规则依赖 01 里定义的面板变量与容器；
+ * 03 的浅色规则**大量**依赖「同特异度、后写者胜」来压过 01/02 的深色默认值。
+ * 因此 `build.mjs` 按**文件名字典序**拼接，01 → 02 → 03 的顺序被文件名固化，
+ * 不靠人记。任何时候都不要给这三个文件改名成破坏字典序的名字。
+ *
+ * ── 加载通道 ──────────────────────────────────────────────────────────────
+ * 走 **build.mjs 现有打包链路**，不在入口处静态 `<link>`。原因：
+ *
+ *   1. 平台没有给插件暴露静态资源路由。`@deepseek-ai/dsh-client-modules` 的
+ *      `/plugins` 路由（bundleResource）只服务 client bundle 与 source map，
+ *      不提供包内任意文件 —— 插件拿不到自己 `assets/` 的 URL；
+ *   2. 客户端产物是单文件工厂函数（`window.__ModuleLoader__.load({...})`），
+ *      运行时没有可靠的「自身目录」，相对路径在打包后必错；
+ *   3. 官方 76 个客户端插件里 54 个都在运行时注入 `<style>`、0 个用 `<link>`，
+ *      这是平台惯例而非权宜。
+ *
+ * 具体链路（`build.mjs`）：
+ *   src/styles/*.css  ──读──▶  拼进 lib/client.js 的 CSS 常量  ──▶ apply() 注入 <style>
+ *                      └────▶  写出 assets/plan-tasks.css（可独立取用的第二形态）
+ *
+ * 也就是说：`assets/plan-tasks.css` 是**产物**，不要手改它；
+ * 要改样式改这里，然后跑 `node build.mjs`。
+ *
+ * ── 本步（79-B）只建骨架 ──────────────────────────────────────────────────
+ * 下面每个分区目前只有标题与说明，规则由 79-C 逐条搬入、79-D 单独处理动画、
+ * 79-E 做全量收尾。在此之前，原 `src/client/20-css/*.js` 仍是生效来源，
+ * 两处暂时并存 —— 这是**有意为之**：让搬运可以逐段进行、每段都能跑测试，
+ * 而不是一次性大爆炸式切换。
+ *
+ * ── 类名前缀约定（全局，三段通用）────────────────────────────────────────
+ *   .plt-*        插件自有组件与布局类
+ *   --plt-*       CSS 自定义属性，只挂在 .plt-root 作用域内，**不用 :root**
+ *   .is-* / .open / .running / .failed / .interrupted / .dragging / .drop-target
+ *   .locked / .active / .done / .is-empty / .is-hidden / .is-measuring
+ *                 状态修饰符 —— 一律叠加在 .plt-* 元素上，从不单独出现，
+ *                 因此不会命中宿主页面里的同名类。
+ * ========================================================================== */
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【1】主题变量
+ * 源：20-css/05-tooltip-vars.js（1 条规则）
+ * 挂在 .plt-root 上而不是 :root —— 作用域跟着面板走，不污染宿主其它区域，
+ * 也不跟官方主题的 inline token 打架。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+.plt-root{
+  --plt-tip-bg:rgba(34,42,56,.97);
+  --plt-tip-fg:#eef2f8;
+  --plt-tip-fg-muted:#c7d2e2;
+  --plt-tip-border:rgba(150,175,215,.30);
+  --plt-tip-shadow:0 2px 6px rgba(0,0,0,.38),0 12px 28px -8px rgba(0,0,0,.5);
+  --plt-tip-radius:8px;
+  --plt-tip-pad:7px 10px;
+  --plt-tip-font:12px;
+  --plt-tip-line:18px;
+  /* 最大宽度只是个上限：实际还要被「面板宽度 - 两侧留白」夹一次，
+     那一步放在组件规则里做（这里若写 cqw，落进 .plt-bar 这类嵌套容器会量错宽度）。 */
+  --plt-tip-max-w:320px;
+  /* 出现延迟：鼠标扫过一排按钮时不该一路弹气泡；淡入比淡出快一点，退场才不突兀。 */
+  --plt-tip-delay:320ms;
+  --plt-tip-fade:140ms;
+  /* 箭头是个旋转 45° 的正方形，边长与「气泡到目标元素」的间距分开给，
+     否则想在窄栏里把气泡贴紧一点，箭头会跟着一起缩没。 */
+  --plt-tip-arrow:5px;
+  --plt-tip-offset:8px;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【1.5】状态主题变量（id=78-A 起，历经 85-B / mBSaIn 两次改色）
+ *
+ * ── 颜色的三次变化（读到这里的人需要知道为什么是现在这个值）──────────────
+ *   1. id=406：待执行与执行中都是**绿色**（同一色系，靠明暗区分）；
+ *   2. id=78-A / 85-B：待执行改成**绿色**、执行中保持**红色**
+ *      （当时的需求是"运行中的那条要跳出来"）；
+ *   3. mBSaIn：用户反馈「红配绿不好看」，执行中由红改**黄色**。
+ *
+ * ── 为什么红配绿确实不好看（不只是主观）──────────────────────────────────
+ *   红与绿是互补色，等亮度并置时会产生**边缘振颤**（chromatic aberration 的观感），
+ *   看久了眼睛累。更要紧的是语义：两者都在喊"注意这里"，
+ *   放在同一组里等于两个都喊，反而都听不清。
+ *   黄色与绿同属暖侧、亮度接近，并置不刺眼；色相差异又够大，
+ *   一眼仍能分出"整组是绿的、这一条是黄的"。
+ *
+ * ── 为什么深色与浅色要用不同的值 ─────────────────────────────────────────
+ * 同一支色在两套底色上不可能都达标（这是 id=78-A 时就定下的原则）：
+ *   · 深底（rgb 22,24,28）上，暗色全糊 —— 深红 #991b1b 只有 2.14:1，
+ *     深黄 #a16207 更低；所以深色侧要用**亮**的一档；
+ *   · 白底上，亮色又太浅 —— #ffd60a 只有 1.3:1，几乎看不见；
+ *     所以浅色侧要用**深**的一档。
+ * 实测对比度见下面各段注释。
+ *
+ * ── 两级的层级差异 ──────────────────────────────────────────────────────
+ * 待执行 = 「还没开工」→ 绿；
+ * 执行中 = 「正在跑」   → 黄（深色侧比绿亮一档，浅色侧用更深的黄保证可读）。
+ * 层级靠"亮/暗 + 色相"两重区分，不靠饱和度堆叠。
+ */
+ *
+ * ── 命名 ─────────────────────────────────────────────────────────────────
+ * 按**语义**命名（todo / run + bg/fg/line/hover/on），不按「red-1/red-2」：
+ * 以后换色只改变量值，所有引用点一个字都不用动。
+ *
+ * 值格式说明：主色/描边给的是 **RGB 三元组**（不带 rgb() 外壳），
+ * 这样调用方可以自由套透明度：rgba(var(--plt-todo,46,160,67),.16)。
+ * 与既有的 --plt-accent 完全同一套用法，替换时不用改调用语法。
+ * ────────────────────────────────────────────────────────────────────────── */
+.plt-root{
+  /* —— 待执行：深色（默认主题）· id=85-B 由红改绿 ——
+   *
+   * 为什么只改这 6 个值就够：待执行组的所有颜色（组标题、徽标、卡片边框、
+   * 左侧色条、文字强调色、数量角标、开始按钮）都引用这一套变量 ——
+   * 这正是当初「按语义命名而不按 red-1/red-2」的用途（见上方命名说明）。
+   *
+   * 绿色取值与原来红的**观感重量相当**：
+   *   #f05252 → 5.11:1，换成 #2ea043 → 5.27:1。
+   *   没有挑更亮的绿（如 #4ade80 的 10.2:1）—— 那会在深底上过于跳，
+   *   与旁边已审核组的灰、待审核组的琥珀不在一个重量级上。
+   *
+   * 执行中（--plt-run）**改为黄色**（用户反馈「红配绿不好看」）。
+   *
+   * 85-B 把待执行改绿之后，执行中的红就成了同一组里的对比色 —— 红绿并置本身
+   * 刺眼，而且两者都在强调"这是活的"这件事，反而互相削弱。
+   * 现在用黄色：与绿同属暖侧、亮度接近，并置不刺眼，但色相差异够大，
+   * 一眼仍能分出"整组是绿的、这一条是黄的"。
+   *
+   * 取值 #ffd60a：深底上 12.59:1（原红 5.87:1），明显更亮 ——
+   * 执行中是这一屏**唯一**需要被立刻找到的那条，亮一档是合理的层级。
+   * 与待执行绿（46,160,67）的亮度比 2.39:1，色相又分属黄/绿，区分度足够。
+   */
+  --plt-todo:46,160,67;          /* #2ea043 · 主色，深底上 5.27:1 */
+  --plt-todo-fg:187,247,208;     /* #bbf7d0 · 主色文字在深底上更亮，用于标题/计数 */
+  --plt-todo-line:46,160,67;     /* 边框/描边（调用处再套透明度） */
+  --plt-todo-bg:46,160,67;       /* 浅底色（调用处套 .045~.16 的低透明度） */
+  --plt-todo-hover:74,222,128;   /* #4ade80 · 悬停：提亮一档 */
+  --plt-todo-on:63,185,80;       /* #3fb950 · 选中/激活：更实 */
+
+  /* —— 执行中：深色（黄色）—— */
+  --plt-run:255,214,10;          /* #ffd60a · 深底上 12.59:1 */
+  --plt-run-fg:255,233,138;      /* #ffe98a · 文字，深底上 14.62:1 */
+  --plt-run-line:255,214,10;
+  --plt-run-bg:255,214,10;
+
+  /* —— 强调色（id=IlSb8Z）——
+   *
+   * `--plt-accent` 原来**只**定义在分组选择器上（02-content.css:168-172），
+   * `.plt-root` 自己没有。而分组之外的规则（按钮、气泡、顶栏）也大量引用它，
+   * 全靠"这些元素恰好都在某个分组里"这条隐含前提才成立。
+   *
+   * 一旦某个元素不在组内（新加控件、气泡被挂到外面、DevTools 里把节点拖出子树），
+   * `var(--plt-accent,140,140,140)` 就解析为空 —— 这正是 DevTools Issues 里
+   * 「--plt-accent / --plt-todo is not defined」那一类告警的来源，
+   * 表现是颜色失效、回落成白/透明。
+   *
+   * 在根上给一份中性默认值：不在组内的元素拿到灰色（不再是"未定义"），
+   * 在组内的元素仍被各分组自己的取值覆盖，行为不变。
+   * 默认取 140,140,140 —— 与 `.plt-group` 基础值一致，组外元素本该是中性色。 */
+  --plt-accent:140,140,140;}
+
+/* ── 输入卡片基色（id=2-C）──────────────────────────────────────────────────
+ *
+ * `--plt-composer-bg` 原先**只在消费处写了 fallback**：
+ *   .plt-composer{ background: …, var(--plt-composer-bg,#0d1830) }
+ * 全仓（src/ assets/ lib/）搜不到任何一处定义 —— 它能工作纯粹靠那个 #0d1830。
+ *
+ * 为什么现在补上而不是继续靠 fallback：
+ *   ① fallback 只覆盖"变量未定义"这一种情况，**改不了主题**；
+ *      将来若想让卡片底色跟着主题走，没有变量可调。
+ *   ② 变量审计要求「被引用的变量都有定义」，它一直是清单里唯一的例外。
+ *
+ * 放在这里（`.plt-root`）而不是 `.plt-composer` 自己的规则里：
+ *   与其它 --plt-* 主题变量同一处，改色时不用翻两个文件；
+ *   且 `.plt-composer` 是 `.plt-root` 的后代，能正常继承。
+ *
+ * 取值来源：原先硬编码在 fallback 里的 #0d1830（深蓝黑）。
+ * 它不是随手挑的 —— 卡片上面还要叠三层蓝渐变
+ *（径向蓝光 + 135° 蓝紫 + 顶部高光），基底必须够深才压得住，
+ * 否则叠出来会发灰。数值原样搬过来，不趁机改色。
+ *
+ * 只在这里定义深色值：浅色档的 .plt-composer 用**字面量**
+ * （#ffffff → #fdfdfe 渐变，见 03-theme.css:135），
+ * 根本不消费这个变量，所以浅色块里不需要同名定义。 */
+.plt-root{
+  --plt-composer-bg:#0d1830;   /* 深蓝黑 · 输入卡片基底，上面叠三层蓝渐变 */
+}
+
+/* 浅色主题：绿必须压深，白底才够对比（7.13:1）。 */
+body:not([data-ds-dark-theme]) .plt-root{
+  /* id=85-B：待执行由红改绿（浅色档）。
+     红原本是 #b91c1c（6.47:1），绿取 #166534（7.13:1）—— 略高一点，
+     因为绿在白底上的可读性天然不如红，压深一档才不至于"发灰"。
+     -fg 用更深的 #14532d：它压在浅绿底（.10 透明度）上，需要比主色更深才读得清。 */
+  --plt-todo:22,101,52;          /* #166534 · 白底上 7.13:1 */
+  --plt-todo-fg:20,83,45;        /* #14532d · 更深，压在浅绿底上仍可读 */
+  --plt-todo-line:22,101,52;
+  --plt-todo-bg:22,101,52;
+  --plt-todo-hover:21,128,61;    /* #15803d · 悬停提亮一档（5.02:1） */
+  --plt-todo-on:21,128,61;
+
+  /* —— 执行中：浅色（黄色）—— */
+  /* 白底上不能直接用 #ffd60a（对比度只有 1.3:1，几乎看不见）。
+     压成 #a16207（yellow-700）：白底 4.92:1 达标，色相仍是明确的黄。
+     没有选更深的 #854d0e / #92400e —— 那两者在白底上会读成"棕色"，
+     与"等待中"的语义距离反而变远；4.92:1 虽不富余，但执行中的文字有
+     font-weight:600 加粗辅助，且它不是需要长时间阅读的内容（只有编号行）。 */
+  --plt-run:161,98,7;            /* #a16207 · 白底上 4.92:1 */
+  --plt-run-fg:133,77,14;        /* #854d0e · 文字用更深一档，白底 6.85:1 */
+  --plt-run-line:161,98,7;
+  --plt-run-bg:161,98,7;
+
+  /* —— 强调色（id=IlSb8Z，浅色档）——
+     与深色档同理：组外元素也要有定义，否则 var(--plt-accent,140,140,140) 解析为空。
+     取 140,140,140 与 `.plt-group{--plt-accent:140,140,140}` 一致 ——
+     那条基础规则在深浅两套主题下都生效，这里是它的同源副本。 */
+  --plt-accent:140,140,140;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【2】面板根与顶栏
+ * 源：20-css/10-topbar.js（26 条规则）
+ * 面板容器（含 container-type:size，让输入框按面板实际高度伸缩）、标题、
+ * 开始/暂停按钮、内联 SVG 图标基类、剪贴板兜底用的离屏节点。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* container-type:size（id=152）：让输入框的高度能按「面板实际高度」伸缩（cqh），
+   而不是按窗口高度（vh）。侧栏被拖矮时 vh 察觉不到，会把列表挤成负数高度；
+   用 cqh 后输入框自己先收，列表始终留得下。
+   position:relative（id=171）：container-type 只建立 cqh 容器，**不建立 absolute 的包含块**。
+   没有它，面板里 position:absolute;inset:0 的两块遮罩会锚到浏览器视口（ICB）而不是面板自己 ——
+   实测面板 460×700 时遮罩撑成 512×602，于是「在遮罩里居中」= 在错误的盒子里居中。 */
+.plt-root{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;container-type:size;font-size:14px;color:var(--dsw-alias-label-primary,#e6e6e6)}
+.plt-top{flex:0 0 auto;display:flex;flex-wrap:nowrap;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--dsw-alias-border-secondary,rgba(255,255,255,.08))}
+.plt-title{font-weight:600;font-size:19px;letter-spacing:.01em;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plt-btn{cursor:pointer;border:1px solid var(--dsw-alias-border-secondary,rgba(255,255,255,.14));background:transparent;color:inherit;border-radius:6px;padding:3px 9px;font-size:14px;line-height:20px;white-space:nowrap}
+.plt-btn:hover:not(:disabled){background:var(--dsw-alias-bg-hover,rgba(255,255,255,.06))}
+.plt-btn:disabled{opacity:.5;cursor:default}
+.plt-btn.primary{background:var(--dsw-alias-bg-accent,#2f6fd0);border-color:transparent;color:#fff}
+.plt-auto{display:inline-flex;align-items:center;gap:6px;min-width:62px;justify-content:center;font-variant-numeric:tabular-nums}
+.plt-auto .plt-dot{width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-label-caption,#8a8a8a);flex:0 0 auto}
+.plt-auto.on{color:var(--dsw-alias-label-accent,#7fb0ff);border-color:rgba(80,140,255,.45)}
+.plt-auto.on .plt-dot{background:#4caf50;box-shadow:0 0 0 2px rgba(76,175,80,.18)}
+/* 顶栏很窄时把开始/暂停按钮收一档（id=k7xFdQ 重算）。
+ *
+ * 历史：这段是 id=88-B 为「38px 高 + 三颗控件」的溢出加的补丁。
+ * 之后顶栏的「自动确认」被删除（id=wZIKdd），本按钮也收回 28px（本次），
+ * 重新算空间：固定控件 自动刷新 62 + 本按钮 108 = 170，加 3×8 gap 与 24 padding
+ * 合计 218px —— 280px 侧栏下仍剩 62px，**不再有溢出风险**。
+ *
+ * 所以这一档从「防止溢出」降级为「窄屏更紧凑」的观感微调：
+ * 只收最小宽度与横向内边距，**不再动纵向 padding**（动了就不是等高 28px 了，
+ * 而"与倒计时等高"正是本次的需求）。 */
+@container (max-width:360px){
+  /* id=8sg3iA：主规则已经降到 76px，这一档若还留着 92px 就**比主规则更宽**了
+     —— 窄屏反而变宽，逻辑颠倒。同步下调到 68px。 */
+  .plt-start,.plt-pause{min-width:68px;padding:3px 9px;gap:5px}
+}
+/* 更窄（≤300px）时连文字一起收掉，只留图标。
+   纵向 padding 仍保持 3px，配合 line-height 20px 撑出同样的 28px，
+   点击区不会因为收起文案而变矮。 */
+@container (max-width:300px){
+  .plt-start,.plt-pause{min-width:0;padding:3px 9px}
+  .plt-start-sub,.plt-pause-sub{display:none}
+}
+/* 开始 / 暂停（id=207）：顶栏里的图标按钮。
+   inline-flex + gap 让图标与文字垂直居中并保持固定间距；flex:0 0 auto
+   保证顶栏被压窄时这个按钮不参与收缩，压缩全部由 .plt-title 承担。
+   id=354：两组类名保留，但同一时刻只会挂上其中一个（由 agentRunning 决定），
+   所以下面那套「互斥」的配色实际上永远作用于屏幕上唯一的那颗按钮。
+   min-width + 居中（id=354）：这颗按钮的文案会在 开始 / 继续 / 发送中… / 暂停 / 暂停中
+   之间换，字数不同。给一个按最长文案（「发送中…」）量的固定宽度，
+   换文案时按钮不伸缩，右侧的倒计时也不会跟着左右跳。 */
+/* 开始 / 暂停（id=207 渲染；id=88-B 曾加大到 38px；id=k7xFdQ 收回与倒计时一致）
+ *
+ * ── 尺寸（与相邻的「倒计时」按钮完全对齐）────────────────────────────────
+ *   高度      38px → **28px**（padding 7→3 纵向 + line-height 22→20 + 边框 2）
+ *   字号      15px → **14px**
+ *   内边距    7px 14px → **3px 14px**（横向保持 14 —— 文案比「自动刷新」长）
+ *   图标      15px（保持，由渲染处传 size，见 60-tab.js）
+ *   最小宽度  108px（保持 —— 「发送中…」比「自动刷新」宽）
+ *
+ * 为什么回到 28px：倒计时（`.plt-auto`）走的是 `.plt-btn` 基础尺寸
+ * （padding 3px 9px + line-height 20px + 边框 2 = 28px），两者在同一行并排，
+ * 一个 38px 一个 28px 会让顶栏看起来参差 —— 用户要求「高度一致」。
+ *
+ * 与 88-B 的关系（如实记录）：88-B 当时把高度从 28 加到 38，理由是「点击区偏小」。
+ * 现在收回 28 是**用户对观感的取舍**：一行里两颗控件等高优先于单颗更大的点击区。
+ * 若将来又嫌点击区小，正确做法是**两颗一起加高**（同时改 .plt-btn），
+ * 而不是只加这一颗 —— 那正是这次要修的问题。
+ *
+ * 横向 padding 保留 14（不是倒计时那 9）：本按钮文案最长是「发送中…」四字，
+ * 横向留白不足会显得挤；它与倒计时不等宽是**刻意的**，用户要的是等高。
+ *
+ * 不写死 height：用 padding + line-height 自然撑出 28px，
+ * 这样宿主主题放大字号时按钮会跟着长，而不是把文字截断。
+ *
+ * ── 对齐 ─────────────────────────────────────────────────────────────────
+ *   flex:0 0 auto —— 顶栏被压窄时不参与收缩（压缩全交给 .plt-title），
+ *   否则按钮会先被挤扁，点击区反而变小。
+ *   与「倒计时」同为 28px，「自动刷新」圆点开关在它左侧，
+ *   由顶栏的 align-items:center 统一对齐，不需要额外 margin。
+ *
+ * 字号 14px 与倒计时按钮一致，与标题（14px）同级 ——
+ * 同一行的控件字号统一，视觉上才是一排而不是一堆。 */
+/* id=6Gs9v1-B：**「完成后暂停」开关也进这条共享规则**。
+ *
+ * 三者（开始 / 暂停 / 完成后暂停）在顶栏并排，尺寸必须同一份来源：
+ * gap / flex / min-width / padding / font-size / line-height / font-weight。
+ * 之前开关自己写了一整套（18px 高的小胶囊），搬到顶栏后只能靠补偿规则去追，
+ * 两边永远在对齐与走散之间反复。
+ *
+ * 现在把它并进来之后，**改这一条三个按钮一起变**，不会再出现一个高一个矮。
+ * 它自己的配色（常态灰 / 开态黄 / hover / disabled）仍然由
+ * 02-content.css 的 .plt-auto-pause 系列决定，互不干扰。 */
+/* id=8sg3iA：**暂停按钮短一点**。
+ *
+ * 原来 min-width:108px + padding:3px 14px。而按钮的实际内容只有
+ *「图标 15 + gap 6 + 两个汉字 ≈ 28」≈ 49px，加 padding 后自然宽约 79px ——
+ * min-width 又把它撑到 108px，**白多出 29px 空白**，两个字的按钮看着像四个字宽。
+ *
+ * 改：min-width 108 → 76，padding 14 → 10。
+ *   自然宽降到约 71px，76 兜得住，所以「开始 ↔ 暂停」互切时宽度仍然不跳
+ *   —— min-width 原本就是为了这件事故意设的，不能直接删掉（删了字体一换宽度就变）。
+ *   「停后 / 继续」内容更窄（约 64px），同一条 min-width 兜着，三个按钮一样宽。
+ *
+ * 净效果：每个按钮窄约 32px，顶栏一行省下近 100px。 */
+.plt-start,.plt-pause,.plt-auto-pause{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:0 0 auto;min-width:76px;padding:3px 10px;font-size:14px;line-height:20px;font-weight:500}
+/* 开始按钮是这一行里的唯一的主动作，给一点绿色倾向（不是实心，仍然克制），
+   让它在中性的「自动刷新」按钮旁边能被一眼找到。 */
+/* id=85-B：开始按钮的绿改用 --plt-todo 变量，不再硬编码 rgba(34,150,84)。
+ *
+ * 它原本就是绿的，但那个绿（34,150,84）与待执行组的主色（现在 46,160,67）
+ * 不是一个值 —— 题面要的「全部使用同一套绿色变量，避免部分绿部分红」，
+ * 也包括这种"两个绿各走各的"的隐性混搭。
+ *
+ * 注意：这个按钮在顶栏 .plt-top 里，**不在** .plt-group-todo 内，
+ * 所以拿不到那层 --plt-accent 重定向，必须直接引 --plt-todo。
+ * --plt-todo 定义在 .plt-root 上，顶栏是它的后代，能正常继承。 */
+.plt-start:not(:disabled){color:var(--dsw-alias-label-primary,#e6e6e6)}
+.plt-start:not(:disabled):hover{background:rgba(var(--plt-todo,46,160,67),.14);border-color:rgba(var(--plt-todo,46,160,67),.45)}
+/* 暂停是反向动作，hover 透出暖橙，与开始分得开又不至于像报错。
+   id=88-B：改用 --plt-run 变量（原为硬编码 216,120,32）。
+   理由与 85-B 修开始按钮同源：硬编码色不跟主题走，换主题会露馅。 */
+.plt-pause:not(:disabled):hover{background:rgba(var(--plt-run,255,214,10),.14);border-color:rgba(var(--plt-run,255,214,10),.5)}
+/* —— 四个状态的视觉（id=210）——
+   未开始 / 执行中 / 已暂停 / 异常，各自由既有的推导变量挂类，不新增状态：
+   · .plt-start.is-resume —— 已挂起，这个按钮现在是「继续」，用蓝调与「开始」的绿区分；
+   · .plt-pause:not(:disabled) —— 执行中它才是可点的，给琥珀描边说明「现在能停」；
+   · :disabled —— 统一压到 .42（.plt-btn 的 .5 在这两个带色按钮上仍然偏亮）；
+   · .plt-top.has-error —— 上次操作失败时描红，和顶部的错误提示对上。
+   id=354 起屏幕上只有一颗按钮，这些规则按「它此刻是谁」生效，不再需要两颗对齐。 */
+.plt-start.is-resume:not(:disabled){color:rgba(120,162,255,.98);border-color:rgba(80,140,255,.46);background:rgba(65,118,230,.12)}
+.plt-start.is-resume:not(:disabled):hover{background:rgba(65,118,230,.20);border-color:rgba(80,140,255,.62)}
+.plt-pause:not(:disabled){color:rgba(255,190,90,.96);border-color:rgba(255,180,60,.42)}
+.plt-start:disabled,.plt-pause:disabled{opacity:.42}
+/* id=88-B：禁用时把 hover 的暖橙/绿压掉 ——
+   否则禁用时鼠标划过仍会亮起，看起来像「能点但没反应」。
+   尺寸变大后误触变多，这条比之前更重要。 */
+.plt-start:disabled:hover,.plt-pause:disabled:hover{background:transparent;border-color:var(--dsw-alias-border-secondary,rgba(255,255,255,.14))}
+/* id=88-B：focus-visible —— 键盘聚焦时给一圈完整可见的轮廓。
+   按钮变大后更容易成为 Tab 落点，没有这圈提示会不知道焦点在哪。
+   用 outline 而非 box-shadow：后者会被 6px 圆角裁掉两侧。 */
+.plt-start:focus-visible,.plt-pause:focus-visible{outline:2px solid var(--dsw-alias-border-accent,rgba(80,140,255,.75));outline-offset:2px}
+/* 执行中把「暂停」的图标压暗一点点，让文字比图标更先被读到；
+   文字保持可读，禁用时不受影响（:not(:disabled) 已经排除）。 */
+.plt-pause:not(:disabled) svg{opacity:.92}
+.plt-top.has-error .plt-start,.plt-top.has-error .plt-pause{border-color:rgba(214,68,68,.52)}
+.plt-top.has-error .plt-start.is-resume:not(:disabled){border-color:rgba(214,68,68,.62)}
+/* id=71-D：内联 SVG 图标的公共形态。
+   这些规则原先写成每个图标组件里的 style 对象字面量
+   （14 处重复）—— 现在统一由类承担，组件只写 className。
+
+   三个类的分工：
+   1. .plt-ico —— 所有插件图标的基础：块级、不继承基线对齐导致的 1px 缝隙；
+   2. .plt-ico-fixed —— 追加 flex:0 0 auto：与文字并排时不被压缩
+      （图标是定宽方块，被压扁比换行更难看）；
+   3. .plt-ico-brand —— 只有 PlanIcon 用：品牌蓝。取 static 层 token，
+      主题包不会改写它（alias 层的 brand 在某些主题下会变成近白色）。 */
+.plt-ico{display:block}
+.plt-ico-fixed{flex:0 0 auto}
+.plt-ico-brand{color:var(--dsw-static-deepseek-500,#4176e6)}
+/* 剪贴板兜底用的临时 textarea（30-runtime.js 的 copyText 在 navigator.clipboard
+   不可用时走这条路）：移出视口、不可见，但仍然能被 select() 选中。
+   top 用 -1000px 而不是 display:none —— 后者会让节点无法 select()。
+   类定义在这里而不是内联，是因为它是纯固定值、与运行时计算无关。 */
+.plt-offscreen{position:fixed;top:-1000px;left:0;opacity:0;pointer-events:none}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【3】遮罩与顶部行内提示
+ * 源：20-css/11-overlay.js（21 条规则｜2 个 @keyframes｜4 条 animation）
+ * 拆解中贴边提示卡、提交/审核结果提示。
+ * ⚠ 动画：keyframes 名 plt-split-fade、plt-split-in（79-D 专项处理）
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* 拆解遮罩：点发送立刻盖上，右侧贴边一张提示卡。
+   pointer-events:none 是刻意的 —— 遮罩只做视觉提示，不接管点击，
+   底下（以及侧边栏其它）按钮仍然可以正常点，不会出现「点不动了」。 */
+.plt-split-mask{position:absolute;inset:0;z-index:18;background:rgba(6,14,26,.42);pointer-events:none;animation:plt-split-fade .16s ease both}
+/* 卡片层级永远高于遮罩（它是遮罩的子节点，天然在上）。
+   id=171：从「贴右边缘探出来」改成面板正中 —— left:50% + translate(-50%,-50%)，
+   圆角/边框/阴影都恢复四边对称（贴边时代的 border-right:none、单侧投影都是为贴合用的）。 */
+.plt-split-card{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  display:flex;align-items:center;gap:12px;
+  /* id=213：原来是纯内容撑开（实测恒为 164×64.3，跟面板宽高一点关系都没有），
+     看着像个小气泡，用户反馈「有点小」。这里按面板宽度给个显式宽度（76% → 封顶 240px），
+     纵向 padding 一并加厚，让卡片整体放大 ~1.45 倍而**宽高比基本不变**（原 2.55:1）。
+     id=214：补上下限。四条全挂在面板尺寸上（cqw/cqh 以 .plt-root 为容器，见 10-topbar.js:13），
+     不写死像素：
+       · min-width 是硬下限（150px），保证极窄侧栏下不塌成一条；
+         但它自身再被 92cqw 夹一次，所以「抬高下限」永远不会导致横向溢出。
+       · max-width 是兜底封顶，比 width 宽一档，正常永远不生效 —— 只有将来 width 被改小/内容
+         撑破时才会接管，避免横向跑出面板。
+       · min-height / max-height 夹住纵向：矮面板下不让卡片高过面板（否则内容被面板裁掉），
+         此时卡片内部自己滚动（overflow:auto），比静默裁切可读。
+     width/max-width 这里刻意用 cqw 而不是百分比 —— 百分比算的是包含块（遮罩），
+     与 min() 混用推不直观；cqw 就是面板宽度的 1%，一眼可算。 */
+  width:min(76cqw,240px);
+  min-width:min(150px,92cqw);
+  max-width:min(92cqw,300px);
+  min-height:min(64px,28cqh);
+  max-height:min(78cqh,240px);
+  overflow:auto;
+  box-sizing:border-box;
+  /* id=215：内边距从 22/20 改成 20/22 —— 横向略大于纵向是卡片的常规比例，
+     原来的「纵向比横向还厚」让两行字看着被上下夹扁。 */
+  padding:20px 22px;
+  /* 圆角对齐输入区那张「悬浮卡片」（.plt-composer 的 14px），不再自成一套 12px。 */
+  border-radius:14px;
+  border:1px solid rgba(124,162,232,.22);
+  /* 底色跟着输入区那套走：上亮下暗的极淡渐变（模拟顶部受光），不再是一块纯色。 */
+  background:linear-gradient(180deg,rgba(28,36,50,.97),rgba(20,27,38,.97));
+  /* 阴影分三层，和输入区卡片同一套「贴地影 + 中距扩散 + 远距弥散」再加一道顶部内高光：
+     单层大投影会让卡片看着像贴在纸上，分层才有厚度。 */
+  box-shadow:0 2px 4px rgba(3,9,22,.34),0 12px 26px -10px rgba(4,12,30,.6),0 32px 60px -26px rgba(8,20,48,.66),inset 0 1px 0 rgba(158,190,246,.14);
+  color:#f2f4f7;font-size:15px;line-height:1.6;
+  pointer-events:auto;
+  animation:plt-split-in .22s cubic-bezier(.22,.9,.28,1) both;
+}
+/* 转圈给一点蓝：它原来跟正文同色（近白），在放大后的卡片里显得发灰、不像「正在进行」。
+   取值与插件主色同一支（深色下偏亮的蓝，浅色下用深一档的蓝）。 */
+.plt-split-card svg{color:#8ab0f5;flex:0 0 auto}
+.plt-split-card .plt-split-text{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1 1 auto}
+.plt-split-card .plt-split-text strong{font-weight:600;letter-spacing:.1px}
+.plt-split-card .plt-split-hint{color:rgba(232,238,247,.68);font-size:13px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@keyframes plt-split-fade{from{opacity:0}to{opacity:1}}
+/* 进场关键帧必须与基础样式的 transform 用同一套居中值：
+   animation 的 fill-mode 是 both，动画跑完后保留的是**关键帧里的 to**，不是基础样式 ——
+   若 to 还写着旧的 translate(0,-50%)，卡片会永久偏右半个身位（实测 dx=+56px）。
+   方向也换了：贴边时代是从左往右滑进面板；居中后改成从中心上方 14px 落位，不再横向漂移。 */
+@keyframes plt-split-in{from{opacity:0;transform:translate(-50%,calc(-50% - 14px))}to{opacity:1;transform:translate(-50%,-50%)}}
+@media (prefers-reduced-motion: reduce){
+  .plt-split-mask{animation:none}
+  .plt-split-card{animation:none}
+}
+/* 顶部行内提示：提交 / 审核 / 拖拽保存的结果，显示在自动刷新按钮左侧。 */
+.plt-notice{flex:0 1 auto;min-width:0;max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;line-height:18px;padding:0 7px;border-radius:999px;background:rgba(76,175,80,.13);border:1px solid rgba(76,175,80,.32);color:#6fc47a}
+/* 输入区做成「悬浮卡片」：整块从列表里抬起来。
+   立体感由四层叠出来 ——
+   1) 渐变底：上亮下暗，模拟顶部受光；
+   2) 内斜面：顶部 1px 白高光 + 底部 1px 暗边，形成厚度；
+   3) 两层外投影：近距离贴地影 + 远距离扩散影；
+   4) 卡片下方一道模糊的接触阴影（.plt-form-wrap::after），让它「离地」。 */
+/* 输入区现在贴在面板底部（列表在上、输入在下）：上留白给列表一点呼吸，
+   下留白让卡片离底边有距离，接触阴影落在卡片正下方。 */
+/* 输入区保持在本层：拆解遮罩是 pointer-events:none，不会拦点击，
+   而遮罩里的提示卡片（z-index 18）仍然盖在输入区之上，读起来是「浮在最上层」的那一层。 */
+.plt-form-wrap{position:relative;z-index:2;flex:0 0 auto;padding:8px 12px 11px 12px}
+/* 卡片正下方的接触阴影：横向收窄的椭圆模糊，投影越实、悬浮感越强。带一点蓝，和卡片同色系。 */
+.plt-form-wrap::after{content:'';position:absolute;left:26px;right:26px;bottom:2px;height:14px;border-radius:50%;background:rgba(6,14,32,.52);filter:blur(10px);z-index:0;pointer-events:none}
+/* 偏蓝的深色 + 蓝色渐变：底色走带蓝相的海军墨蓝，
+   上面叠一层从左上到右下的蓝色渐变（蓝 → 微紫 → 深蓝收尾），
+   再加第二层顶部高光，整体「沉一点的蓝」而不是发灰的黑。 */
+.plt-composer{position:relative;z-index:1;display:flex;flex-direction:column;gap:7px;background:
+  radial-gradient(120% 140% at 8% 0%,rgba(96,152,255,.22),rgba(96,152,255,0) 58%),
+  linear-gradient(135deg,rgba(64,116,224,.20) 0%,rgba(92,120,232,.10) 46%,rgba(10,26,58,.30) 100%),
+  linear-gradient(180deg,rgba(92,142,232,.10),rgba(92,142,232,0) 46%,rgba(2,8,20,.34)),
+  var(--plt-composer-bg,#0d1830);border:1px solid rgba(96,146,236,.24);border-radius:14px;padding:10px 10px 9px;box-shadow:0 2px 3px rgba(3,9,22,.26),0 10px 22px -8px rgba(4,12,30,.62),0 26px 50px -22px rgba(8,20,48,.66),0 0 0 1px rgba(96,146,236,.05),inset 0 1px 0 rgba(140,180,255,.14),inset 0 -1px 0 rgba(2,8,20,.55),inset 0 0 0 1px rgba(120,166,246,.02);transition:border-color .16s ease,box-shadow .18s ease,transform .18s ease}
+.plt-composer:hover{transform:translateY(-1px);border-color:rgba(112,164,250,.38);box-shadow:0 2px 3px rgba(3,9,22,.28),0 14px 28px -8px rgba(6,16,38,.64),0 34px 58px -24px rgba(10,26,60,.68),0 0 22px -6px rgba(76,132,224,.22),inset 0 1px 0 rgba(150,190,255,.18),inset 0 -1px 0 rgba(2,8,20,.56)}
+.plt-composer:focus-within{transform:translateY(-2px);border-color:var(--dsw-alias-border-accent,rgba(96,152,255,.72));box-shadow:0 0 0 3px rgba(80,140,255,.16),0 2px 3px rgba(3,9,22,.2),0 18px 34px -8px rgba(6,18,44,.56),0 40px 70px -26px rgba(10,28,66,.64),0 0 30px -6px rgba(86,144,238,.3),inset 0 1px 0 rgba(168,202,255,.26),inset 0 -1px 0 rgba(2,8,20,.46)}
+/* 聚焦时卡片顶部落一道淡蓝渐隐，强化「被拿起来」的感觉。 */
+.plt-composer::before{content:'';position:absolute;inset:0;z-index:0;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .2s ease;background:linear-gradient(180deg,rgba(96,152,255,.20),transparent 52%)}
+.plt-composer:focus-within::before{opacity:1}
+/* 文字层与操作层压在渐隐之上，避免那层极淡的蓝把正文染灰。 */
+.plt-composer .plt-input,.plt-composer .plt-bar{position:relative;z-index:1}
+@media (prefers-reduced-motion: reduce){.plt-composer{transition:border-color .16s ease,box-shadow .18s ease}.plt-composer:hover,.plt-composer:focus-within{transform:none}}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【4】悬浮提示（tooltip）
+ * 源：20-css/06-tooltip.js（22 条规则）
+ * 气泡本体、四方向箭头、两个状态类（.is-hidden 未测量/隐藏、.is-measuring 测量中）。
+ * 位置与最大尺寸由 JS 按实时测量结果内联写入，**不在本文件里**。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+.plt-tip{position:fixed;z-index:60;box-sizing:border-box;max-width:var(--plt-tip-max-w,320px);padding:var(--plt-tip-pad,7px 10px);border:1px solid var(--plt-tip-border,rgba(150,175,215,.30));border-radius:var(--plt-tip-radius,8px);background:var(--plt-tip-bg,rgba(34,42,56,.97));color:var(--plt-tip-fg,#eef2f8);box-shadow:var(--plt-tip-shadow,0 2px 6px rgba(0,0,0,.38),0 12px 28px -8px rgba(0,0,0,.5));font-size:var(--plt-tip-font,12px);line-height:var(--plt-tip-line,18px);font-weight:400;font-style:normal;letter-spacing:.01em;text-align:left;white-space:pre-line;overflow-wrap:anywhere;word-break:break-word;pointer-events:none;opacity:0;transition:opacity var(--plt-tip-fade,140ms) ease,transform var(--plt-tip-fade,140ms) ease}
+/* 出现时只把不透明度与位移收回来，不留 display 切换 —— 那会让淡出根本没时间播。 */
+.plt-tip.is-on{opacity:1;transform:none}
+/* id=71-D：两个状态类，替代原先散在 40-tip.js 里的 el.style.* 赋值。
+   .is-hidden    —— 还没测量完 / 已隐藏。用 visibility 而不是 display:none：
+                    节点必须保持在布局里（要量 offsetWidth/height 才能算放置位置），
+                    display:none 量出来全是 0，气泡会定位到左上角。
+   .is-measuring —— 仅在「量包含块原点」的那一瞬加上：把方向类带来的 3px 位移抵消掉，
+                    否则同一颗气泡换到相反方向时那 3px 会翻倍成 6px 偏差。
+   两者的值都是固定常量，与运行时计算无关，所以收进样式表。 */
+.plt-tip.is-hidden{visibility:hidden}
+.plt-tip.is-measuring{transform:none}
+/* 箭头基底：0 尺寸 + border 拼三角，颜色按方向各给一条。 */
+.plt-tip::before,.plt-tip::after{content:'';position:absolute;width:0;height:0;border-style:solid;border-color:transparent;pointer-events:none}
+.plt-tip::before{border-width:calc(var(--plt-tip-arrow,5px) + 1px)}
+.plt-tip::after{border-width:var(--plt-tip-arrow,5px)}
+/* —— 上：气泡在目标之上，箭头朝下 —— */
+.plt-tip--top{transform:translateY(3px)}
+.plt-tip--top::before{left:50%;bottom:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));margin-left:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));border-top-color:var(--plt-tip-border,rgba(150,175,215,.30))}
+.plt-tip--top::after{left:50%;bottom:calc(-1 * var(--plt-tip-arrow,5px));margin-left:calc(-1 * var(--plt-tip-arrow,5px));border-top-color:var(--plt-tip-bg,rgba(34,42,56,.97))}
+/* —— 下：箭头朝上 —— */
+.plt-tip--bottom{transform:translateY(-3px)}
+.plt-tip--bottom::before{left:50%;top:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));margin-left:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));border-bottom-color:var(--plt-tip-border,rgba(150,175,215,.30))}
+.plt-tip--bottom::after{left:50%;top:calc(-1 * var(--plt-tip-arrow,5px));margin-left:calc(-1 * var(--plt-tip-arrow,5px));border-bottom-color:var(--plt-tip-bg,rgba(34,42,56,.97))}
+/* —— 左：箭头朝右 —— */
+.plt-tip--left{transform:translateX(3px)}
+.plt-tip--left::before{top:50%;right:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));margin-top:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));border-left-color:var(--plt-tip-border,rgba(150,175,215,.30))}
+.plt-tip--left::after{top:50%;right:calc(-1 * var(--plt-tip-arrow,5px));margin-top:calc(-1 * var(--plt-tip-arrow,5px));border-left-color:var(--plt-tip-bg,rgba(34,42,56,.97))}
+/* —— 右：箭头朝左 —— */
+.plt-tip--right{transform:translateX(-3px)}
+.plt-tip--right::before{top:50%;left:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));margin-top:calc(-1 * (var(--plt-tip-arrow,5px) + 1px));border-right-color:var(--plt-tip-border,rgba(150,175,215,.30))}
+.plt-tip--right::after{top:50%;left:calc(-1 * var(--plt-tip-arrow,5px));margin-top:calc(-1 * var(--plt-tip-arrow,5px));border-right-color:var(--plt-tip-bg,rgba(34,42,56,.97))}
+/* 文字装在内层，外层只负责边框、箭头与定位（id=251）。
+   高度上限由脚本按面板高度写进 style，这里只声明「超了就裁」——
+   放在外层会连箭头的位子一起裁掉，所以只能在内层裁。 */
+.plt-tip-inner{overflow:hidden}
+/* 气泡贴边翻到另一侧时，箭头不需要跟着重描 —— 方向类一换，上面四组自动就位。 */
+
+/* 用户要求减少动效：连位移一起撤掉，只保留瞬时显隐（不做淡入也照样能读）。 */
+@media (prefers-reduced-motion: reduce){
+  .plt-tip{transition:none;transform:none}
+}
+/* 浅色不需要额外规则：颜色全部来自变量，而变量在 30-light.js 里已经换过一套。
+   这里刻意不写 body:not([data-ds-dark-theme]) 覆盖 —— 多一套就多一处会忘记同步的地方。 */
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【5】输入区骨架
+ * 源：20-css/12-composer.js（1 条规则）
+ * 列表容器：外层绝不出滚动条，只有展开的组内部滚动。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* 外层列表自己绝不出滚动条：高度固定，只有展开的组内部滚动。 */
+/* 列表容器：左右/下多留一点内边距，给三个组的外阴影留出扩散空间（否则会被 overflow 裁掉）。 */
+.plt-list{flex:1 1 auto;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:9px;padding:8px 18px 16px 18px}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【6】输入控件与表单
+ * 源：20-css/17-input.js（31 条规则）
+ * 输入框、表单包装、发送按钮底座。
+ * ────────────────────────────────────────────────────────────────────────── */
+
+.plt-input{width:100%;box-sizing:border-box;background:var(--dsw-alias-bg-tertiary,rgba(0,0,0,.2));color:inherit;border:1px solid var(--dsw-alias-border-secondary,rgba(255,255,255,.14));border-radius:6px;padding:6px 8px;font-size:16px;font-family:inherit;resize:vertical;min-height:104px;line-height:1.5}
+.plt-input::placeholder{font-size:16px;color:var(--dsw-alias-label-tertiary,#6b7280)!important;opacity:1!important}
+/* —— Cursor 式输入区：整块一个圆角框，文字在上、胶囊标签在左下、圆形发送键在右下 ——
+   （卡片外观与悬浮效果定义在 .plt-composer 的上面那段，这里只管内部排版） */
+/* 输入区高度（id=152）：从固定的 104px 加高到 clamp(104px, 26cqh, 176px)。
+   26cqh 按「本面板高度」算：常见窗口下取到上限 176px，输入面积比原来大六成；
+   侧栏被拖矮时自动收到 104px 下限，把列表的空间让出来。 */
+.plt-composer .plt-input{background:transparent;border:none;border-radius:0;padding:2px 2px 0;min-height:clamp(104px,26cqh,176px);resize:none;outline:none;line-height:1.55;caret-color:var(--dsw-alias-label-accent,#7fb0ff)}
+/* 面板被拖到很矮时分档收缩（id=152）：26cqh 在 340px 以下已经到底限 104px，
+   再矮就会把列表和操作条挤出面板。逐档收输入框、内外边距、胶囊与按钮尺寸，
+   保证「操作条始终完整可见、列表至少留一行」。 */
+@container (max-height: 340px){
+  .plt-composer .plt-input{min-height:64px}
+  .plt-form-wrap{padding-top:6px;padding-bottom:8px}
+  .plt-list{padding-top:4px;padding-bottom:8px}
+}
+@container (max-height: 260px){
+  .plt-composer .plt-input{min-height:52px}
+  .plt-composer{gap:5px}
+  .plt-form-wrap{padding:5px 10px 6px 10px}
+}
+@container (max-height: 200px){
+  .plt-composer .plt-input{min-height:38px}
+  .plt-chip{padding:3px 8px}
+  .plt-deep-toggle,.plt-send{width:26px;height:26px}
+  .plt-form-wrap{padding:4px 8px 5px 8px}
+  .plt-list{padding-top:2px;padding-bottom:4px}
+}
+/* 暗色调：placeholder 用中灰而不是浅灰，避免整块看起来发白。
+   注意：主题包 dsh-official-homepage-theme 会无条件给所有 input 的 placeholder
+   打上 color:rgba(193,208,228,.72) !important（浅白蓝），在浅色主题的白底上等于隐形。
+   这里必须同样用 !important 才能在层叠里压过它，否则默认提示文字会整个消失。 */
+.plt-composer .plt-input::placeholder{color:var(--dsw-alias-label-tertiary,#6b7280)!important;opacity:1!important}
+/* 胶囊标签在暗底上再压深一档，保持「暗色调」的统一。 */
+.plt-composer .plt-chip{background:rgba(255,255,255,.045);border-color:rgba(255,255,255,.07);color:var(--dsw-alias-label-secondary,#aab2bf)}
+.plt-composer .plt-chip:hover:not(:disabled){background:rgba(255,255,255,.09)}
+/* 输入框下方的操作条：胶囊组 + D/F/S 三个圆钮，永远排成一行，不换行也不溢出（id=145）。
+   宽度不够时按阶梯收缩：先收间距与内边距，最窄一档把胶囊文字换成纯图标
+   （文字语义仍在 title / aria-label 上），这样四枚胶囊 + 三个圆钮始终齐整一行。 */
+.plt-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;row-gap:6px;min-width:0;container-type:inline-size}
+/* 面板窄到连纯图标的一行都放不下时，只让「三个圆钮」整体折到第二行并靠右，
+   胶囊组始终完整一行、绝不截断 —— 这种情况下换行比切掉发送钮好。 */
+.plt-bar>.plt-deep-toggle{margin-left:auto}
+/* 胶囊组：横向可收缩但绝不换行；真的放下了也不许把胶囊截断，
+   所以下限设 min-content —— 到那一步之前 .plt-chip-txt 已经被隐藏了。 */
+.plt-chips{display:flex;flex-wrap:nowrap;align-items:center;gap:6px;flex:1 1 auto;min-width:min-content;overflow:hidden;scrollbar-width:none}
+.plt-chips::-webkit-scrollbar{display:none}
+/* 一个「段」= 可选连接符 + 一枚胶囊，段内不拆开，换行时连接符永远不会变成孤儿。 */
+.plt-seg{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto}
+/* 任务类型胶囊：定高 28px、左右内边距固定，四枚按钮高度与基线才能完全对齐。
+   高度写死而不靠 padding 撑，是因为图标 13px 的中文行盒会随字体不同浮 1px。 */
+.plt-bar .plt-chip{height:28px;box-sizing:border-box;padding:0 10px;justify-content:center}
+/* 连接符（类型之间的「-」、拆解前的「+」）：定高与胶囊等高，靠 flex 居中，
+   这样它和两侧文字的中线永远在同一条线上；左右由 .plt-seg 的 gap 拉开，因此等距。
+   不能被选中，也不要响应鼠标。 */
+.plt-op{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;height:28px;width:10px;font-size:14px;line-height:1;font-family:inherit;color:var(--dsw-alias-label-caption,#8a8a8a);opacity:.7;user-select:none;-webkit-user-select:none;pointer-events:none}
+/* 窄一档：先收间距与内边距。 */
+@container (max-width:560px){.plt-chips,.plt-seg{gap:4px}.plt-bar .plt-chip{padding:0 8px}}
+/* 关键一档：图标+文字一起放不下时，先去掉图标、字号降一号 ——
+   四个类型靠文字区分，读起来比看图省事，所以先舍图标而不是先舍文字。 */
+@container (max-width:470px){.plt-bar .plt-chip-ico{display:none}.plt-bar .plt-chip{padding:0 9px;font-size:13px}.plt-chip-split{padding:0 9px}}
+/* 再窄：连纯文字也挤了，才退回纯图标（语义仍在 title / aria-label 上）。 */
+@container (max-width:360px){.plt-bar .plt-chip-txt{display:none}.plt-bar .plt-chip-ico{display:inline-flex}.plt-bar .plt-chip{padding:0 8px;font-size:14px}.plt-chip-split{padding:0 8px;border-radius:8px}}
+/* 极窄面板：再收一档间隙。 */
+@container (max-width:330px){.plt-chips,.plt-seg{gap:3px}.plt-bar .plt-chip{padding:0 5px}.plt-chip-split{padding:0 5px}.plt-bar{gap:6px}}
+

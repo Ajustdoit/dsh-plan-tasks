@@ -20,11 +20,7 @@
           height: size,
           role: 'img',
           'aria-label': '任务列表',
-          style: {
-            display: 'block',
-            flex: '0 0 auto',
-            color: ICON_BLUE,
-          },
+          className: 'plt-ico plt-ico-fixed plt-ico-brand',
         },
         h('rect', {
           x: 1,
@@ -74,7 +70,7 @@
           height: size,
           role: 'img',
           'aria-label': '提交',
-          style: { display: 'block' },
+          className: 'plt-ico',
         },
         h('path', {
           d: 'M12 19V5',
@@ -91,31 +87,6 @@
           strokeLinecap: 'round',
           strokeLinejoin: 'round',
         }),
-      )
-    }
-
-    /** 草稿按钮图标：一页带折角的文档（草稿 = 存下来还没用的文稿）。 */
-    function DraftIcon(props) {
-      const size = typeof props?.size === 'number' && props.size > 0 ? props.size : 15
-      return h(
-        'svg',
-        {
-          xmlns: 'http://www.w3.org/2000/svg',
-          viewBox: '0 0 24 24',
-          width: size,
-          height: size,
-          role: 'img',
-          'aria-label': '草稿',
-          fill: 'none',
-          stroke: 'currentColor',
-          strokeWidth: 2,
-          strokeLinecap: 'round',
-          strokeLinejoin: 'round',
-          style: { display: 'block' },
-        },
-        h('path', { d: 'M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z' }),
-        h('path', { d: 'M13 3v6h6' }),
-        h('path', { d: 'M9 13h6M9 17h4' }),
       )
     }
 
@@ -136,7 +107,7 @@
           strokeWidth: 2,
           strokeLinecap: 'round',
           strokeLinejoin: 'round',
-          style: { display: 'block' },
+          className: 'plt-ico',
         },
         h('path', { d: 'M4 7h16' }),
         h('path', { d: 'M6.5 12h11' }),
@@ -163,7 +134,7 @@
           strokeWidth: 2,
           strokeLinecap: 'round',
           strokeLinejoin: 'round',
-          style: { display: 'block' },
+          className: 'plt-ico',
         },
         h('path', { d: 'M12 3v4' }),
         h('path', { d: 'M12 7H5.5v3.2' }),
@@ -191,7 +162,7 @@
         strokeLinecap: 'round',
         strokeLinejoin: 'round',
         'aria-hidden': 'true',
-        style: { display: 'block' },
+        className: 'plt-ico',
       }
       if (kind === '仅回答') {
         // 对话气泡 + 里面的点
@@ -221,29 +192,6 @@
       )
     }
 
-    /** 修改图标（铅笔，跟类型胶囊里的「修改」图标同款）。 */
-    function EditIcon(props) {
-      const size = typeof props?.size === 'number' && props.size > 0 ? props.size : 12
-      return h(
-        'svg',
-        {
-          xmlns: 'http://www.w3.org/2000/svg',
-          viewBox: '0 0 24 24',
-          width: size,
-          height: size,
-          fill: 'none',
-          stroke: 'currentColor',
-          strokeWidth: 1.9,
-          strokeLinecap: 'round',
-          strokeLinejoin: 'round',
-          'aria-hidden': 'true',
-          style: { display: 'block' },
-        },
-        h('path', { d: 'M4 20h4.2L20.1 8.1a2.1 2.1 0 0 0 0-3L19 4a2.1 2.1 0 0 0-3 0L4.1 15.9 4 20z' }),
-        h('path', { d: 'M14.5 5.5l4 4' }),
-      )
-    }
-
     /** 空组里的占位图标：虚线条目框 + 中间一道横线，跟列表图形一个家族。 */
     function EmptyIcon(props) {
       const size = typeof props?.size === 'number' && props.size > 0 ? props.size : 22
@@ -260,7 +208,7 @@
           strokeLinecap: 'round',
           strokeLinejoin: 'round',
           'aria-hidden': 'true',
-          style: { display: 'block' },
+          className: 'plt-ico',
         },
         h('rect', { x: 3.2, y: 4.6, width: 17.6, height: 14.8, rx: 3, strokeDasharray: '3 2.6' }),
         h('path', { d: 'M8 10.5h8M8 14h5' }),
@@ -283,7 +231,7 @@
           strokeLinecap: 'round',
           strokeLinejoin: 'round',
           'aria-hidden': 'true',
-          style: { display: 'block' },
+          className: 'plt-ico',
         },
         h('path', { d: 'M9 5.5 15.5 12 9 18.5' }),
       )
@@ -305,10 +253,42 @@
           strokeLinecap: 'round',
           strokeLinejoin: 'round',
           'aria-hidden': 'true',
-          style: { display: 'block', flex: '0 0 auto' },
+          className: 'plt-ico plt-ico-fixed',
         },
         h('rect', { x: 9, y: 9, width: 12, height: 12, rx: 2.4 }),
         h('path', { d: 'M5.6 15H4.4A2.4 2.4 0 0 1 2 12.6V4.4A2.4 2.4 0 0 1 4.4 2h8.2A2.4 2.4 0 0 1 15 4.4v1.2' }),
+      )
+    }
+
+    /**
+     * 对勾图标（id=382）：待审核条目操作区里的「通过」。
+     *
+     * 与 TrashIcon 成对：两者尺寸相同、线稿风格相同（viewBox 24、stroke 2、圆角端点），
+     * 所以同一排里并排放着时视觉重量一致 —— 这正是一条任务要求的
+     * 「图标风格、尺寸、颜色、hover/禁用态与垃圾桶一致」。
+     * 颜色走 currentColor：深/浅两套主题由 .plt-pass-icon 的规则决定，图标本身不管配色。
+     * 尺寸默认 13，与 TrashIcon 的默认值一致（不是巧合 —— 两者要并排对齐）。
+     */
+    function CheckIcon(props) {
+      const size = typeof props?.size === 'number' && props.size > 0 ? props.size : 13
+      return h(
+        'svg',
+        {
+          xmlns: 'http://www.w3.org/2000/svg',
+          viewBox: '0 0 24 24',
+          width: size,
+          height: size,
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 2,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+          'aria-hidden': 'true',
+          className: 'plt-ico plt-ico-fixed',
+        },
+        // 一个略带起伏的长勾：起笔在左下、转折在中下、收笔在右上。
+        // 只画一条路径而不是「圆底 + 勾」—— 圆底在 13px 下会被糊成一坨。
+        h('path', { d: 'M20 6.5L9.4 17.1a1.2 1.2 0 0 1-1.7 0L3.6 13' }),
       )
     }
 
@@ -334,7 +314,7 @@
           strokeLinecap: 'round',
           strokeLinejoin: 'round',
           'aria-hidden': 'true',
-          style: { display: 'block', flex: '0 0 auto' },
+          className: 'plt-ico plt-ico-fixed',
         },
         // 桶盖：顶盖 + 提手
         h('path', { d: 'M4 6.5h16' }),
@@ -363,7 +343,7 @@
           strokeLinecap: 'round',
           strokeLinejoin: 'round',
           'aria-hidden': 'true',
-          style: { display: 'block', flex: '0 0 auto' },
+          className: 'plt-ico plt-ico-fixed',
         },
         h('path', { d: 'M12 19V6' }),
         h('path', { d: 'M6.5 11.5 12 6l5.5 5.5' }),
@@ -392,8 +372,12 @@
           strokeWidth: 2.6,
           strokeLinecap: 'round',
           'aria-hidden': 'true',
-          className: 'plt-spin',
-          style: { display: 'block', flex: '0 0 auto' },
+          // id=79-D：这里曾出现两个 className 键 —— 迁移时把原来的
+          // `style:{display:'block',flex:'0 0 auto'}` 改成 className 后，
+          // 与原有的 `className:'plt-spin'` 撞成重复键。JS 对象字面量里**后者胜**，
+          // 于是 plt-spin 被静默丢弃，转圈图标完全不转（且不报任何错）。
+          // 现在合并成一个：plt-spin 负责动画，plt-ico / plt-ico-fixed 负责基础形态。
+          className: 'plt-spin plt-ico plt-ico-fixed',
         },
         h('path', { d: 'M12 3.2a8.8 8.8 0 1 1-8.8 8.8', opacity: 0.95 }),
       )
@@ -416,7 +400,7 @@
           fill: 'currentColor',
           stroke: 'none',
           'aria-hidden': 'true',
-          style: { display: 'block', flex: '0 0 auto' },
+          className: 'plt-ico plt-ico-fixed',
         },
         h('path', { d: 'M8.5 4.8v14.4L20 12z' }),
       )
@@ -440,7 +424,7 @@
           strokeWidth: 3.2,
           strokeLinecap: 'round',
           'aria-hidden': 'true',
-          style: { display: 'block', flex: '0 0 auto' },
+          className: 'plt-ico plt-ico-fixed',
         },
         h('path', { d: 'M9 5v14' }),
         h('path', { d: 'M15 5v14' }),

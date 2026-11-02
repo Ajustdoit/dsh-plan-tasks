@@ -15,26 +15,36 @@
       // 这两个 prop 就没有读者了，留着是「传了但没人用」的假接口：
       // 后来的人会以为子任务行还能改点什么。
       // `groupKey` 保留：耗时节点的显示条件还要用它（待审核/已审核才画）。
-      const { kids, groupKey } = props
+      // id=89-D：`delivered` 由上层透传 —— 子任务的「执行中」也要按派发记录判定。
+      const { kids, groupKey, delivered } = props
       return h(
         'div',
         { className: 'plt-kids-list' },
         kids.map((child) => {
-          const status = statusOf(child)
+          const status = statusOf(child, false, delivered)
           const durText = fmtDur(child.time)
           const note = String(child.note ?? '')
-          // id=360/361：子任务编号（"2-A"）由宿主在读投影里派生好（store.js 的
+          // id=360/361：子任务编号（形如 `PddZRy-A`）由宿主在读投影里派生好（store.js 的
           // toLiteItem 与 api.js 的 detail 各给一份，见 docs/subtask-numbering.md），
           // 这里只负责画，不再从 id 里切字符串 —— 同一个规则只留一份实现。
           //
-          // 为什么不拼 `#`：顶层条目画的是 `#12`（半子任务行老格式的残留），
-          // 而拆解批次的父已经用「组」这个概念在带子任务了，`2-A` 连读就是「第 2 组 A 条」，
-          // 再加个 `#` 反而变成了两种记号混排。5-A 调研里也是把 `2-A` 当完整编号文本记的。
+          // id=86-B：原来这里写着「为什么不拼 `#`」——那时候编号是 `2-A` 这种纯序号形状，
+          // 跟顶层的 `#12` 是两种记号，混着读别扭。id 改成随机 6 位后，
+          // 子任务编号变成 `PddZRy-A`，与顶层 `#PddZRy` 是同一种身份形状，
+          // 统一加 `#` 反而是消歧而不是制造歧义。该决定已由用户确认。
           //
-          // 空值处理（题面要求）：`code` 为空串时**整个节点不渲染**，
+          // 空值处理（题面要求）：编号文本为空时**整个节点不渲染**，
           // 也不留一个固定宽度的空槽 —— 手工新建的条目没有父子关系，
           // 给它留编号位就等于凭空多出一段缩进，标题会比别的行短一截还找不到原因。
-          const codeText = String(child.code ?? '')
+          //
+          // id=86-B：`code` 缺失时回退到 `child.id`。
+          // `code` 由宿主在 lite 投影里派生（store.js 的 toLiteItem），正常一定有；
+          // 但若调用方拿了未投影的 children（没传 lite:true），就会变成「子任务没有编号」——
+          // 那是**身份丢失**，比显示一个 id 更糟。回退到 id 至少还能对上号；
+          // 两者都空才真的不渲染。
+          // 这里绝不能直接模板化 null/undefined，否则会渲染出 `#undefined`。
+          const rawCode = String(child.code ?? '').trim()
+          const codeText = rawCode !== '' ? rawCode : String(child.id ?? '').trim()
           // id=322 曾把 children 行的编号整个删掉，理由是「子任务不参与拖拽 / 批量，
           // 编号只在父行有意义」。id=361 把这个理由收回来一半：**身份还是要显示的**，
           // 只是形状不同（窄胶囊，不是顶层那枚裸 `#id`），而且位置从「标题之前的最左端」
@@ -61,15 +71,22 @@
               // 所有状态（待执行 / 待审核 / 已审核 / 执行中 / 失败…）都渲染同一个节点，
               // 不做条件分支 —— 编号是身份，不是状态，状态一变编号就消失会让人对不上号。
               // `code` 为空串时返回 null，DOM 里连元素都没有（题面：不留占位空隙）。
+              //
+              // id=86-B：**改为与顶层一致，也带 `#` 前缀**。
+              //
+              // 原先这里刻意不带 `#`，理由是「父已用组带子任务，`2-A` 连读就是第2组A条，
+              // 再加 `#` 成了两种记号混排」。该理由在 id 改为随机 6 位后不再成立：
+              // 子任务编号现在是 `PddZRy-A` 这种，它和顶层的 `#PddZRy` 是同一种身份形状，
+              // 用户的诉求是「列表里所有编号统一成 #xxx」。混排问题反而因为统一前缀而消失。
               codeText !== ''
                 ? h(
                     'span',
                     {
                       className: 'plt-kid-code',
                       // 复制不了也点不了，只是视觉定位；读屏念一遍编号同样是有效信息。
-                      'data-tip': `编号 ${codeText}`,
+                      'data-tip': `编号 #${codeText}`,
                     },
-                    codeText,
+                    `#${codeText}`,
                   )
                 : null,
               h(
@@ -83,8 +100,25 @@
                 // 拆成两层后：外层 overflow 保持 visible（有真基线），内层负责截断。
                 h('span', { className: 'plt-kid-name-text' }, child.name),
               ),
-              durText !== '' && (groupKey === 'unreviewed' || groupKey === 'reviewed')
-                ? h('span', { className: 'plt-dur', 'data-tip': `这条任务耗时 ${durText}` }, durText)
+              // id=383：子任务这一行的耗时原本就有，但显示条件里少了一种情况 ——
+              // 它是 `durText !== ''`（无耗时就整个节点不渲染）。待审核组里每条子任务
+              // 都跑过了，所以正常情况都有数字；可一旦 time 缺失/为 0
+              //（老数据、手工改过的 plan.json、或执行没来得及回填），
+              // 那一行就比同组别的行**少一截**，看起来像渲染坏了而不是「这一条没有耗时」。
+              // 现在待审核/已审核两组统一给兜底「—」：
+              //   · 有数字 → 照旧显示（3分钟47秒）
+              //   · 没数字 → 显示 —，占位与字号都和数字一致，纵向扫视时这一列是齐的
+              // 与单任务那一行用同一套兜底（见上方 item 的 durText 处），
+              // 所以「拆解的子任务」和「单任务」在待审核里长得一样。
+              (groupKey === 'unreviewed' || groupKey === 'reviewed')
+                ? h(
+                    'span',
+                    {
+                      className: `plt-dur${durText === '' ? ' is-empty' : ''}`,
+                      'data-tip': durText === '' ? '这条任务没有记录耗时' : `这条任务耗时 ${durText}`,
+                    },
+                    durText === '' ? '—' : durText,
+                  )
                 : null,
               child.taskType === '仅回答' || child.taskType === '目标'
                 ? h('span', { className: `plt-tag type plt-type-${child.taskType}`, 'data-tip': `任务类型：${child.taskType}` }, h(ModeIcon, { kind: child.taskType, size: 12 }))
@@ -112,19 +146,33 @@
     }
 
     function Item(props) {
-      const { item, open, detail, onToggle, onPatch, onRemove, onFetchDetail, busy, dragging, dropTarget, onDragStart, onDragOver, onDrop, onDragEnd, dragEnabled, selectable, selected, onSelect, showExecute, showReview, groupKey, impliedRunning, canPin, onPinTop, onApproveBatch, onPromote, onDemote, canDemote, editable } = props
+      // id=405：草稿模式移除后，onPromote / onDemote / canDemote / editable 四个 prop
+      // 一并从解构里删掉 —— 它们只服务草稿组（转进 / 转出 / 就地编辑），组没了就没对象。
+      const { item, open, detail, onToggle, onPatch, onRemove, onFetchDetail, busy, dragging, dropTarget, dropped, onDragStart, onDragOver, onDrop, onDragEnd, dragEnabled, selectable, selected, onSelect, showExecute, showReview, groupKey, impliedRunning, canPin, onPinTop, onApproveBatch, delivered } = props
       // id=273：父节点（带 children 的拆解批次）只当容器 —— 它没有正文、不参与执行，
       // 标题行就只显示原始提示词标题（name 本身就是从 sourcePrompt 压出来的），
       // 展开后交给下面的子任务列表，父自己的「计划 / 备注」一块都不渲染。
       const kids = Array.isArray(item.children) ? item.children : []
       const isParent = kids.length > 0
       const groupCount = isParent
-        ? kids.filter((c) => statusOf(c).key === 'todo' || statusOf(c).key === 'running').length
+        ? kids.filter((c) => statusOf(c, false, delivered).key === 'todo' || statusOf(c, false, delivered).key === 'running').length
         : 0
-      const status = statusOf(item, impliedRunning === true)
+      const status = statusOf(item, impliedRunning === true, delivered)
       const time = fmtTime(item.time)
       // id=178：标题行的紧凑耗时（毫秒走 fmtDur）。空串代表缺失/0/非法，整节点不渲染。
-      const durText = fmtDur(item.time)
+      //
+      // id=383：**批次的耗时改从子任务汇总**。
+      //   父节点自己是容器，从不执行，所以 `item.time` 恒为 0（落盘里确实是 0）。
+      //   原来这里只读父自己的 time，于是「单任务有待耗时、拆解批次没有」——
+      //   待审核组里两条并排、一条有数字一条光秃秃，用户看到的就是「拆解任务没显示耗时」。
+      //   真正的耗时在每个 child 上（每个子任务跑完各记各的），汇总才是这一批的答案。
+      //
+      //   取 sum 而不是 max/last：一个批次的总开销就是各段之和，
+      //   而 max 会把「三条各 2 分钟」说成 2 分钟，跟用户排队等待的实际感受不符。
+      //   没有 time 的子任务按 0 计；全为 0 时 fmtDur 仍返回空串，整节点缺席
+      //   （与单任务「缺失/0 就不画」的口径一致）。
+      const batchMillis = kids.reduce((sum, c) => sum + (Number(c?.time) > 0 ? Number(c.time) : 0), 0)
+      const durText = fmtDur(isParent ? batchMillis : item.time)
       // 列表数据是 lite 的（正文截断、备注只留长度）；展开时用按需取回的全文覆盖。
       // 取不到就退回 lite 的截断正文，至少不会空白。
       const loaded = detail !== null && detail !== undefined && detail.id === item.id ? detail : null
@@ -157,106 +205,40 @@
           : typeof item.sourcePrompt === 'string'
             ? item.sourcePrompt
             : ''
-      // 「复制提示词」只给待执行及之后的真实任务卡（草稿还没有出处，不给）；
+      // 「复制提示词」只给待执行及之后的真实任务卡（没有出处的不给）；
       // 没有原始提示词的条目（手工提交的）直接不渲染按钮，而不是给一个点了没反应的空壳。
       const canCopyPrompt = groupKey !== 'draft' && sourceLen > 0
       const [copied, setCopied] = React.useState('')
       // 「原始提示词」的展开状态。
       //
-      // 默认值（id=375）：待执行组里的**拆解批次**默认展开，其余一律默认折叠。
+      // 默认值（id=375 起，id=387 扩到待审核）：
+      //   · 待执行里的**拆解批次**  → 展开（id=375）
+      //   · 待审核里的**所有条目**  → 展开（id=387，本步）
+      //   · 其余一律折叠
       //
-      // 为什么只放开待执行里的批次：
-      //  · 待执行是「接下来要干什么」的清单。批次卡展开后先是子任务列表、
-      //    再是这段原始提示词 —— 用户在这里最需要回头确认「当初是怎么要求的」，
-      //    好判断拆得对不对、要不要先改一版再执行。每次都要多点一下才能看到，
-      //    等于把最该在眼前的东西藏起来。
-      //  · 待审核 / 已审核不放开：那时活已经干完了，用户是来看结果的，
-      //    默认铺开一整段需求会把卡片撑得很长，反而盖住真正的执行结果。
-      //  · 单任务（无 children）不放开：它们没有子任务列表，展开区里就只剩这段原文，
-      //    默认展开等于把卡片直接变成两倍高，而标题已经压自同一段提示词，
-      //    信息是重复的。这条按题面「拆分的任务」的措辞，没有顺带扩大。
+      // 为什么待审核也要放开（题面：「待审核里面的原始提示词 需要自动展开」）：
+      //  待审核是**核对**的地方 —— 要判断「模型交的这份活对不对」，必须能对照
+      //  当初的要求。原来这段原文默认折着，等于让人先点开再评审，
+      //  而这恰恰是审核动作里最该摆在眼前的依据。
+      //  与待执行不同，这里不区分是不是拆解批次：审核时单任务同样需要原文对照，
+      //  题面说的也是「里面的」而不是「拆解任务的」。
       //
-      // 状态仍是本地 useState、仍可在卡片里手动收起/展开（按钮一字未改）。
-      // 只在初次挂载时取这个默认值：条目换组时（todo → unreviewed）是整棵子树
-      // 重新挂载（各组是独立容器），所以会按新组重新取默认，不会把旧状态带过去。
-      const [sourceOpen, setSourceOpen] = React.useState(groupKey === 'todo' && isParent === true)
-      // 草稿就地编辑：editing = 是否展开编辑框，draftText = 编辑中的文本。
-      // 编辑即保存：停止输入片刻就自动落盘，所以没有「保存」按钮；「取消」= 还原成进来时的原文。
-      const [editing, setEditing] = React.useState(false)
-      const [draftText, setDraftText] = React.useState('')
-      const [saveState, setSaveState] = React.useState('idle')
-      // openedRef = 点「编辑」那一刻的原文（取消时还原到它，永不改动）；
-      // savedRef = 最近一次成功落盘的文本（用来跳过无意义的重复写入）。
-      const openedRef = React.useRef('')
-      const savedRef = React.useRef('')
-      const saveTimerRef = React.useRef(null)
-      const pendingRef = React.useRef(null)
-      // 立刻把当前草稿文本落盘（标题跟着正文重新生成）。
-      const flushDraft = async (text) => {
-        pendingRef.current = null
-        if (typeof text !== 'string' || text.trim() === '' || text === savedRef.current) {
-          setSaveState('idle')
-          return
-        }
-        setSaveState('saving')
-        const ok = await onPatch({ plan: text, refreshName: true, silent: true })
-        if (ok === undefined) {
-          setSaveState('error')
-          return
-        }
-        savedRef.current = text
-        setSaveState('saved')
-      }
-      // 输入时不停改 draftText，停手 600ms 后自动保存一次（避免每敲一个字就写盘）。
-      const onEditChange = (value) => {
-        setDraftText(value)
-        setSaveState('pending')
-        if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current)
-        pendingRef.current = value
-        saveTimerRef.current = window.setTimeout(() => {
-          saveTimerRef.current = null
-          void flushDraft(pendingRef.current)
-        }, 600)
-      }
-      // 收起编辑框 / 组件卸载时，把没来得及保存的那一下补上。
-      const stopEditing = async (revert) => {
-        if (saveTimerRef.current !== null) {
-          window.clearTimeout(saveTimerRef.current)
-          saveTimerRef.current = null
-        }
-        const pending = pendingRef.current
-        pendingRef.current = null
-        if (revert === true) {
-          // 取消 = 还原到「点编辑那一刻」的原文（中途自动保存过也照样回滚）。
-          if (openedRef.current !== savedRef.current) {
-            setSaveState('saving')
-            const ok = await onPatch({ plan: openedRef.current, refreshName: true, silent: true })
-            if (ok === undefined) {
-              setSaveState('error')
-              return
-            }
-            savedRef.current = openedRef.current
-          }
-          setDraftText(openedRef.current)
-          setSaveState('idle')
-          setEditing(false)
-          return
-        }
-        if (pending !== null) await flushDraft(pending)
-        setEditing(false)
-      }
-      // 组件卸载（收起分组 / 切页签）时补最后一次写入：丢定时器可以，丢用户的字不行。
-      React.useEffect(
-        () => () => {
-          if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current)
-          const pending = pendingRef.current
-          pendingRef.current = null
-          if (pending !== null && pending !== savedRef.current && pending.trim() !== '') {
-            void onPatch({ plan: pending, refreshName: true, silent: true })
-          }
-        },
-        [],
+      // 为什么敢默认铺开：`.plt-source` 自带 `max-height:200px; overflow:auto`，
+      //  再长的需求也封顶 200px 并在内部滚动，不会把卡片撑成一条。
+      //
+      // 仍然不放开的两档：
+      //  · 已审核：那时已经定稿，用户多半是回看结果，铺开原文只会盖住执行结果；
+      //  · 待执行里的单任务：没有子任务列表，展开区只剩这段原文，
+      //    而标题已经压自同一段提示词，默认展开只是把卡片撑成两倍高（id=375 定的）。
+      //
+      // 状态仍是本地 useState、仍可手动收起/展开（按钮一字未改）。
+      // 只在初次挂载时取这个默认值：条目换组时是整棵子树重新挂载
+      //（各组是独立容器），所以会按新组重新取默认，不会把旧状态带过去。
+      const [sourceOpen, setSourceOpen] = React.useState(
+        (groupKey === 'todo' && isParent === true) || groupKey === 'unreviewed',
       )
+      // id=405：草稿就地编辑整套（editing / draftText / saveState / 自动保存定时器 /
+      // 卸载补写逻辑）随草稿模式一并删除 —— 草稿组已不存在，没有可编辑的对象。
       const doCopy = async (kind) => {
         // 复制要给完整原文：lite 数据里正文是截断的，展开时已取回全文就用全文，
         // 没取回则先补一次 detail 再复制（保证复制到的不是带省略号的半截）。
@@ -275,7 +257,26 @@
         if (kind === 'prompt' && source === '') return
         // 复制 ID 时带上「任务id:」前缀：粘到别的会话里能直接看出这是任务编号，
         // 而不是一串裸数字（容易被误读成版本号 / 行号）。
-        const ok = await copyText(kind === 'id' ? `任务id:${item.id}` : kind === 'prompt' ? source : String(full ?? ''))
+        //
+        // id=86-C：**id 只出现一次，且必须是当前任务的真实 id**。
+        // 这里用一个局部变量把取值收敛掉，避免三件事：
+        //   1. 模板里直接写 `item.id` —— id 缺失时会复制出「任务id:undefined」，
+        //      粘到会话里既没用又会误导模型（它可能真去按 undefined 找任务）；
+        //   2. 将来有人在别处再拼一次前缀，变成「任务任务id:80」那种重复；
+        //   3. 复制到历史数字 id（80）与随机 id（a1b2c3）时出现两种格式。
+        // 前缀固定为 `任务id:`，候值是任务当前的 id（历史数字原样、随机 6 位原样）。
+        let payloadText = ''
+        if (kind === 'id') {
+          const currentId = String(item.id ?? '').trim()
+          // 取不到 id 就不复制 —— 复制一个「任务id:」空壳比不复制更糟。
+          if (currentId === '') return
+          payloadText = `任务id:${currentId}`
+        } else if (kind === 'prompt') {
+          payloadText = source
+        } else {
+          payloadText = String(full ?? '')
+        }
+        const ok = await copyText(payloadText)
         if (ok) {
           setCopied(kind)
           window.setTimeout(() => setCopied(''), 1200)
@@ -286,7 +287,7 @@
       return h(
         'div',
         {
-          className: `plt-item${isParent ? ' plt-parent' : ''}${open ? ' open' : ''}${running ? ' running' : ''}${dragging ? ' dragging' : ''}${dropTarget ? ' drop-target' : ''}${props.sublime === true ? ' plt-sublime' : ''}`,
+          className: `plt-item${isParent ? ' plt-parent' : ''}${open ? ' open' : ''}${running ? ' running' : ''}${dragging ? ' dragging' : ''}${dropTarget ? ' drop-target' : ''}${dropped === true ? ' plt-dropped' : ''}${props.sublime === true ? ' plt-sublime' : ''}`,
           onDragOver: (e) => {
             if (dragEnabled !== true) return
             e.preventDefault()
@@ -366,58 +367,20 @@
           // id=183：已审核组同样挂耗时。两边走的是**同一个** fmtDur、同一个 .plt-dur
           // 节点、同一份样式，只是组白名单多一项——不复制第二份格式化实现，
           // 这样「6分钟28秒」在两处永远长得一样。空串（缺失/0/非法）时整节点缺席。
-          (groupKey === 'unreviewed' || groupKey === 'reviewed') && durText !== ''
-            ? h('span', { className: 'plt-dur', 'data-tip': `这条任务耗时 ${durText}` }, durText)
+          (groupKey === 'unreviewed' || groupKey === 'reviewed')
+            ? h(
+                'span',
+                {
+                  className: `plt-dur${durText === '' ? ' is-empty' : ''}`,
+                  'data-tip': durText === '' ? '这条任务没有记录耗时' : `这条任务耗时 ${durText}`,
+                },
+                durText === '' ? '—' : durText,
+              )
             : null,
           // 类型只用图标表示（和输入栏的胶囊图标一致）：「修改」是默认类型，不显示。
           // 放在状态标签左侧，先看到「这是什么类型的活」，再看到「进行到哪一步」。
           item.taskType === '仅回答' || item.taskType === '目标'
             ? h('span', { className: `plt-tag type plt-type-${item.taskType}`, 'data-tip': `任务类型：${item.taskType}` }, h(ModeIcon, { kind: item.taskType, size: 13 }))
-            : null,
-          // id=354：拆解批次的**整组通过**。父行头部（状态标签左侧）在整批进入
-          // 「待审核」时给一颗「通过」；其余状态一颗都不画 —— 待执行还没结果可审、
-          // 已审核已经审完、草稿/执行中都不该出现这颗按钮，所以这里只认 status.key。
-          // 为什么放头部：一个批次展开后最长能铺十几条子任务，整批通过的操作要在
-          // 不展开、不滚动的状态下就能点到，行内尾部得先滚到底才看得见。
-          // 样式复用 .plt-copy-btn（与计划标题行那颗「通过」、子任务行内那颗同一套胶囊），
-          // 不新造视觉；只用一个 .plt-head-pass 承担「不参与标题伸缩」。
-          // 点击走统一入口 onApproveBatch(整批 id)：本组件不自己遍历子任务，
-          // 也不提供单条通过的第二个入口（单条仍由子任务行内那颗按钮负责）。
-          //
-          // id=368：**没有拆分的普通条目**在待审核时也搬到头部来（原来它藏在展开区里）。
-          // 理由与批次那条完全一样，只是「隐藏成本」更隐蔽：普通条目要看到「通过」
-          // 得先展开卡片 —— 而审核这件事恰恰不需要读正文，一眼扫过列表就能判断
-          // 「这条做完了没有」。放在头部之后，待审核组在收起状态下就是一张可逐条
-          // 点过的清单，不用展开、不用滚动。
-          // 两类条目共用同一个位置与同一套样式，用 isParent 分派动作：
-          //   批次 → onApproveBatch（一次改完整批）
-          //   普通 → onPatch({ review: true })（与原来展开区里那颗完全同一条通道，
-          //          连「自动展开下一条 / 清空后折叠分组」那套行为都原样保留）
-          // running 时两颗都不画：执行中还没有结果可审。
-          (isParent === true && status.key === 'unreviewed') || (isParent !== true && showReview === true && running !== true)
-            ? h(
-                'button',
-                {
-                  className: 'plt-copy-btn plt-head-pass',
-                  type: 'button',
-                  disabled: busy === true || (isParent !== true && item.review === true),
-                  'data-tip':
-                    isParent === true
-                      ? `整批通过：把这一批 ${kids.length} 条子任务一起标成已审核`
-                      : '人工审核这一条的执行结果：标记为已通过',
-                  'aria-label': isParent === true ? '整批通过' : '通过',
-                  onClick: (e) => {
-                    // 头部整行是展开/收起的热区，按钮必须自己吃掉点击。
-                    e.stopPropagation()
-                    if (isParent === true) {
-                      if (typeof onApproveBatch === 'function') onApproveBatch(item.id)
-                      return
-                    }
-                    onPatch({ review: true })
-                  },
-                },
-                h('span', null, '通过'),
-              )
             : null,
           // 置顶（id=319 位置调整）：只有「待执行」组给，正在执行的那条不给（它本来就在最上面）。
           // 必须排在状态徽标**之前** —— 状态列要贴着行尾对齐（见 13-item.js 的
@@ -425,11 +388,60 @@
           // id=320：没有按钮的行也要占同样的宽度，所以「是否有按钮」只决定画不画图标，
           // 槽位本身恒定存在（.plt-pin-slot 固定 20px）—— 否则拆分批次行（永远没有置顶按钮）
           // 的状态标签会比普通行右移 20px，纵向扫视时那一列是锯齿。
-          h(
-            'span',
-            { className: 'plt-pin-slot' },
-            pinTop === true
-              ? h(
+          //
+          // id=399：**但槽位不该在没有后续内容时也占位**（题面：待审核通过按钮右侧有间距，
+          // 想靠右一点、与其它组保持一致的右边距）。
+          //
+          // 间距的来源就在这个槽位：它恒定 20px，而待审核组（id=368）与已审核组（id=358）
+          // 都**不再画状态徽标**，头部最后一颗控件之后就没有东西了 ——
+          // 于是那 20px 成了一段纯空白，加上 .plt-head 的 gap，
+          // 通过按钮看起来比别的组往里缩了一截。
+          //
+          // 修法：只有当这一行**后面还有东西要画**时才保留槽位。
+          // 「后面还有东西」的判定与下面状态徽标那段完全同源：
+          //   · running                → 画转圈徽标
+          //   · 待执行/待审核/已审核   → 不画（id=407 起待执行也不画了）
+          //   · 其余（失败/已中断）    → 画文字徽标
+          // 这样槽位的存在与否跟「右边到底有没有东西」严格一致，
+          // 不会出现「留了位置却空着」或「没留位置结果把徽标挤出去」。
+          //
+          // 注意：id=320 原本要求「同一组内部一律留槽」，那是因为当时三组都要画徽标。
+          // id=407 之后待执行也不画了，于是整个待执行组都不收这个槽 —— 组内仍然对齐，
+          // 与待审核/已审核同一口径。
+          //
+          // id=402：**整块从复制组之后搬到它之前**（题面：置顶放在 id 按钮前）。
+          //
+          // 位置变化：原来顺序是 [复制ID][复制内容][置顶槽]，现在变成
+          // [置顶槽][复制ID][复制内容]。置顶是"把这条往前挪"的动作，
+          // 放在复制之前更符合"先安排位置、再取内容"的读序。
+          //
+          // 注意**没有**破坏上面 id=319 那条约束：置顶仍然排在状态徽标之前。
+          // 整块只是从复制组后方移到前方，与徽标的前后关系一字未动。
+          // 也没动复制组自身的渲染条件（三组白名单）。
+          // id=gR3lBM：**置顶槽位只在真的能放出置顶按钮时渲染**。
+          //
+          // 原来条件是「执行中 / 失败 / 已中断都画槽」，但槽里那颗按钮的条件是
+          // `pinTop = canPin && running !== true`：
+          //   · 执行中的行 —— running 为真 → 永远拿不到按钮；
+          //   · 拆分父（有 decomposeKey，canPin 恒假）→ 也永远拿不到。
+          // 于是这些行渲染出一个**空槽**，DOM 位置正好夹在「N 条」徽标与
+          // 「复制 ID」按钮之间（439 行 vs 498 行），表现为
+          // **20px 槽宽 + 两侧各 8px gap = 36px 的纯空白** —— 用户报的就是这段。
+          //
+          // 修法：条件收敛成 `pinTop === true`。
+          // 这样「有槽必有按钮、没按钮就没槽」，不会再有「留了位置却空着」。
+          //
+          // 代价（已与用户确认接受）：执行中 / 失败 / 已中断这几行的状态徽标会
+          // 比之前靠左 28px。这不影响跨行对齐 —— 徽标是行尾最后一个元素，
+          // 每行都紧贴自己的行尾，右边界仍然一致；只是不再被一段空槽人为推开。
+          //
+          // 待执行组不受影响：那里 pinTop 与 drawPin 一致（有按钮时才画），
+          // 原本就有按钮的行照旧。
+          pinTop === true
+            ? h(
+                'span',
+                { className: 'plt-pin-slot' },
+                h(
                   'button',
                   {
                     className: 'plt-pin',
@@ -440,9 +452,133 @@
                     },
                   },
                   h(PinTopIcon, { size: 12 }),
-                )
-              : null,
-          ),
+                ),
+              )
+            : null,
+          // id=382：头部这颗「通过」**已移除**，改到待审核卡片的底部操作区，
+          // 与「删除」并排成一对图标（[✓ 通过] [🗑 删除]）。
+          //
+          // 为什么不两处都留：一张卡上出现两颗「通过」（头部一颗胶囊、底部一颗图标），
+          // 用户会犹豫该点哪个 —— 它们其实是同一个动作。这一点与 id=354/368 把「通过」
+          // 搬去头部时的取舍相同，只是方向反过来了：当时是为了「不展开也能点」，
+          // 现在的要求是「与垃圾桶图标同区对齐」，两者都要，只能选一处。
+          //
+          // 选底部操作区之后的一个代价（如实记录）：待审核卡在**收起状态**下不再有
+          // 通过入口，要先展开卡片才看得到这一排。这是题面明确指定的位置，不是疏忽；
+          // 若以后想找回「收起也能逐条过」的手感，正确做法是在头部加图标
+          // （与这里同尺寸），而不是把文字胶囊再加回来。
+          // id=389：待审核卡片的「复制 ID / 复制内容」搬到**头部**（题面要求）。
+          // id=393：待执行组的同样搬到头部（题面：待执行里面 复制id 和内容 也放在头部）。
+          //
+          // 为什么放头部：这两个复制动作是「把这条的正文取走」—— 复制完就去别处用，
+          // 不需要先展开正文。放在展开区里，每条都要点开才够得着，与 id=382 把「通过」
+          // 搬到底部操作区是同一类取舍：高频动作不该藏在展开态后面。
+          //
+          // 覆盖范围现在只有这两组：待审核（id=389）+ 待执行（id=393）。
+          // 已审核保持原样 —— 题面两次都只点了具体的组名，不顺手扩大。
+          //
+          // 形态用头部复制按钮那套文字胶囊样式：
+          // 头部不能塞图标 —— 与垃圾桶并排时两个图标容易点错，
+          // 而复制是无害动作、删除是破坏性的，形状上就该分得开。
+          //
+          // 「复制内容」在几个组里的差异：
+          //   · 拆解批次（isParent）→ **原始提示词**。父自己没有正文（plan 恒为空），
+          //     对它来说「内容」就是这批任务当初的需求原文。
+          //   · 普通条目 → 自己的计划正文。
+          // 两种情况都可能需要 detail 取全文，doCopy 已按 kind 分别处理。
+          //
+          // id=396：已审核也纳入（题面：已审核里面也将复制id和内容放在头，
+          // 展开里面移除这两个按钮）。三组齐全了：待执行 / 待审核 / 已审核。
+          // （id=405：草稿组已删除，原来关于「草稿不纳入」的说明随之作废。）
+          //
+          // 已审核的「复制内容」为什么也是批次取提示词：
+          // 已审核里既有单任务也有整批（整批审完会连父带 children 一起归档），
+          // 而归档的父同样没有正文 —— 判定沿用同一个 isParent，无需另立规则。
+          groupKey === 'unreviewed' || groupKey === 'todo' || groupKey === 'reviewed'
+            ? h(
+                'div',
+                { className: 'plt-head-copies' },
+                // 复制 ID：所有条目都有（id 是身份）。
+                h(
+                  'button',
+                  {
+                    className: `plt-btn plt-head-copy${copied === 'id' ? ' done' : ''}`,
+                    type: 'button',
+                    title: `复制这条计划的 ID（${item.id}）`,
+                    'aria-label': '复制 ID',
+                    'data-tip': `复制这条计划的 ID（${item.id}）`,
+                    onClick: (e) => {
+                      e.stopPropagation()
+                      void doCopy('id')
+                    },
+                  },
+                  copied === 'id' ? '已复制' : 'ID',
+                ),
+                (isParent === true ? sourceLen > 0 : canCopyPlan === true)
+                  ? h(
+                      'button',
+                      {
+                        className: `plt-btn plt-head-copy${copied === (isParent === true ? 'prompt' : 'plan') ? ' done' : ''}`,
+                        type: 'button',
+                        disabled: isParent === true && sourceLen === 0,
+                        title: isParent === true ? '复制这一批的原始提示词' : '复制这条计划的完整内容',
+                        'aria-label': isParent === true ? '复制原始提示词' : '复制内容',
+                        'data-tip': isParent === true
+                          ? `复制这一批的原始提示词（${sourceLen} 字）`
+                          : '复制这条计划的完整内容',
+                        onClick: (e) => {
+                          e.stopPropagation()
+                          void doCopy(isParent === true ? 'prompt' : 'plan')
+                        },
+                      },
+                      copied === (isParent === true ? 'prompt' : 'plan') ? '已复制' : '内容',
+                    )
+                  : null,
+              )
+            : null,
+          // id=390：待审核的「通过」搬到**头部**（题面：通过放在头部，不再放在展开里面）。
+          //
+          // 位置在复制组之后、置顶槽 / 状态徽标之前 —— 这样右侧状态那一列仍然对齐
+          //（id=320 的「槽位恒定」约定不为它让路）。
+          //
+          // 为什么放头部：审核是逐条扫读的动作。通过按钮藏在展开区里，意味着
+          // 每审一条都要先展开、找到按钮、再收起 —— 而「这条做完了没有」看标题
+          // 就够了，根本不需要读正文。搬到头部之后，待审核组在**收起状态下**
+          // 就是一张可以逐条点过的清单。
+          //
+          // 形态：图标按钮（CheckIcon），与旁边的复制胶囊同高 26px，
+          // 但用 .plt-pass-icon 的实色描边强调「这是推进状态的动作」，
+          // 与复制那种中性动作在颜色上分开。
+          //
+          // 两类条目共用同一位置，用 isParent 分派动作（与 id=354/368 完全一致）：
+          //   批次 → onApproveBatch（一次改完整批）
+          //   普通 → onPatch({ review: true })
+          // running 时两颗都不画：执行中还没有结果可审。
+          ((isParent === true && status.key === 'unreviewed') || (isParent !== true && showReview === true && running !== true))
+            ? h(
+                'button',
+                {
+                  className: 'plt-btn plt-icon-btn plt-pass-icon plt-head-pass-btn',
+                  type: 'button',
+                  disabled: busy === true || (isParent !== true && item.review === true),
+                  title: isParent === true ? '通过：把这一批标成已审核' : '通过：标记为已通过',
+                  'aria-label': isParent === true ? '整批通过' : '通过',
+                  'data-tip': isParent === true
+                    ? `整批通过：把这一批 ${kids.length} 条子任务一起标成已审核`
+                    : '人工审核这一条的执行结果：标记为已通过',
+                  onClick: (e) => {
+                    // 头部整行是展开/收起的热区，按钮必须自己吃掉点击。
+                    e.stopPropagation()
+                    if (isParent === true) {
+                      if (typeof onApproveBatch === 'function') onApproveBatch(item.id)
+                      return
+                    }
+                    onPatch({ review: true })
+                  },
+                },
+                h(CheckIcon, { size: 13 }),
+              )
+            : null,
           /**
            * 状态徽标（id=352-D）。
            *
@@ -450,9 +586,10 @@
            * 三个字占的宽度随字号变，而图标是一个定宽方块 —— 一列里只有它一个「词」，
            * 眼睛会被反复拉过去。转圈本身已经把「在跑」说清楚了。
            *
-           * 尺寸（见 .plt-tag.running / .plt-run-dot）：外框固定 26×20，与文字徽标
+           * 尺寸（见 .plt-tag.running / .plt-tag.plt-run-only）：外框固定 26×20，与文字徽标
            * 的行高 20px 对齐，所以整列右边界不会因为这一条从文字变成图标而移动。
-           * 其余状态（待执行/待审核/草稿/失败/中断）一个字都没改。
+           * 其余状态（待执行/待审核/失败/中断）一个字都没改。
+           * id=407：待执行现在也不画标记了（原先是空心圆点），所以只剩失败/中断那两档还画文字徽标。
            *
            * id=358：「已审核」这一档**不再画徽标**。已审核组里的每一条都必然是已审核
            *（进组条件就是 execute+review），右端再挂一个「已审核」等于把同一句话说 N 遍，
@@ -467,6 +604,25 @@
            * 标题截断得越少越好。
            * 于是 running 之外**只剩**需要「与所在组不同」的状态才画徽标
            *（待执行 / 草稿 / 失败 / 已中断），组内一致的两种（待审核 / 已审核）都不画。
+           *
+           * id=401：**待执行这一档从文字改成一个空心圆点**（题面：待执行组里
+           * 显示一个文字不好看，换一种展示方式）。
+           *
+           * 为什么不是像待审核/已审核那样直接不画：
+           * 待执行组里**不只有 todo**。执行中的显示转圈、失败的显示「失败」、
+           * 中断的显示「已中断」—— 所以这一列是有内容的，不能整体留空。
+           * 而「正常待执行」是组内主体，占绝大多少行；每行挂一个「待执行」
+           * 等于把组名重复 N 遍，还都是同一个词，扫视时这一列毫无信息量。
+           *
+           * 空心圆点的语义：一个还没被勾掉的待办。它与执行中的转圈形成一组对照
+           *（空圈 = 还没开始 / 转圈 = 正在跑），比文字更轻，也更容易在一列里
+           * 一眼扫出「哪些还没动」。
+           *
+           * 尺寸仍是固定的 20×20 外壳（与文字徽标行高一致），所以这一列右边界
+           * 不会因为某行从点变成字而移动 —— 与 id=352-D 给转圈定的规矩同源。
+           * 点本身 7px + 1.5px 描边，颜色取 caption 而非组色：
+           * 它是「尚未开始」的状态标记，不是组身份，用中性色才不会跟
+           * 组头的彩虹 accent 打架。
            */
           status.key === 'running'
             ? h(
@@ -480,13 +636,18 @@
                 },
                 h(SpinnerIcon, { size: 13 }),
               )
-            : status.key === 'reviewed' || status.key === 'unreviewed'
+            // id=407：待执行**不再画状态标记**（题面：这条设计方式不要了）。
+            // 原来是 20px 的透明胶囊里放一颗 7px 空心圆点 —— 单独看还行，
+            // 但它与「执行中」的转圈、其它状态的字徽标挤在同一列，
+            // 而待执行组本身已经有组色（绿）标识身份，再挂一个灰圆点属于重复表达。
+            // 现在三组统一：组名说明状态时不画徽标（待审核/已审核同理）。
+            : status.key === 'todo' || status.key === 'reviewed' || status.key === 'unreviewed'
               ? null
-              : h(
-                  'span',
-                  { className: `plt-tag ${status.key}` },
-                  h('span', null, status.label),
-                ),
+                : h(
+                    'span',
+                    { className: `plt-tag ${status.key}` },
+                    h('span', null, status.label),
+                  ),
           /**
            * 头部删除入口（id=359 建，id=374 扩到待执行）。
            *
@@ -508,45 +669,8 @@
            *
            * 执行中（running）不给：正在跑的条目删掉会打断模型，与底部那排的取舍一致。
            */
-          /**
-           * id=376：待执行的「转为草稿」也搬到头部，排在垃圾桶**左边**。
-           *
-           * 顺序是刻意的：转草稿是「还能撤回的安排」、删除是「不可恢复」，
-           * 破坏性更强的那个永远在最右端 —— 手滑滑到底撞到的是删除，
-           * 所以更该让它离别的控件远一点、也让人有更长的移动距离可以反悔。
-           *
-           * 为什么文字按钮能进头部（而删除必须用图标）：头部已经有标题在抢宽度，
-           * 两个中文占的地方不小，但它只在待执行组出现（别的组不渲染），
-           * 且 `.plt-head-demote` 里给了 `flex:0 0 auto` + 窄屏收一档，
-           * 最坏情况是标题先截断（.plt-name 是 flex:1 1 auto，本来就该让位）。
-           * 反过来，把「转草稿」做成图标会与垃圾桶混淆 —— 两个都是图标时，
-           * 用户在高频操作里更容易点错那个不可恢复的。
-           *
-           * 批次与单任务**同一个位置、同一个形态**：题面要求的「一视同仁」。
-           * 这需要同时放开 canDemote 里对批次的排除（见 60-tab.js 的注释）。
-           *
-           * 行为一字未动：仍是 onDemote（→ moveToGroup([item.id], true) → call('update')），
-           * 与底部文字按钮同一条通道。
-           */
-          canDemote === true
-            ? h(
-                'button',
-                {
-                  className: 'plt-btn plt-head-demote',
-                  type: 'button',
-                  disabled: busy,
-                  title: '转为草稿：退出执行队列，存进草稿组',
-                  'aria-label': '转为草稿',
-                  'data-tip': isParent === true ? '转为草稿：整批退出执行队列，存进草稿组' : '转为草稿：退出执行队列，存进草稿组',
-                  onClick: (e) => {
-                    // 头部整行是展开/收起的热区，按钮必须自己吃掉点击。
-                    e.stopPropagation()
-                    if (typeof onDemote === 'function') onDemote()
-                  },
-                },
-                '转为草稿',
-              )
-            : null,
+          // id=405：头部这颗「转为草稿」按钮随草稿模式删除。
+          // 它的唯一去向是草稿组，草稿组已不存在。
           (groupKey === 'reviewed' || (groupKey === 'todo' && running !== true))
             ? h(
                 'button',
@@ -579,10 +703,13 @@
                 // id=371：只传 groupKey（耗时节点的显示条件要用它）。
                 // busy / onPatch 已随「单个通过」按钮一起移除，理由见 KidsList 顶部。
                 groupKey,
+                // id=89-D：子任务的「执行中」也按派发记录判定，与父同一份数据。
+                delivered,
               }),
               // 原始提示词仍留在最下面：这一批当初是根据哪句话拆出来的。
-              // id=375：待执行组的批次默认展开（默认值在 Item 顶部的 sourceOpen 算，
-              // 这里不重复判断 —— 否则「默认值」与「渲染条件」会变成两处口径）。
+              // 默认展开的组：待执行（id=375，批次）与待审核（id=387，全部）——
+              // 默认值统一在 Item 顶部的 sourceOpen 算，这里不重复判断，
+              // 否则「默认值」与「渲染条件」会变成两处口径。
               // 按钮行为不变：点一下仍可收起，收起后就只留这一行标题。
               (sourceText !== '' || (loaded === null && sourceLen > 0))
                 ? h(
@@ -611,6 +738,14 @@
                     sourceOpen ? h('div', { className: 'plt-source' }, sourceText !== '' ? sourceText : '（加载中…）') : null,
                   )
                 : null,
+              // id=395：批次这一档的 .plt-meta（子任务数 / 创建时间）**保留独立一行**。
+              //
+              // 题面说的是「计划那一排右侧」—— 而批次卡片**没有**「计划」那一排：
+              // 父自己的正文恒为空，展开区的第一块直接就是子任务列表 + 原始提示词
+              //（见上方 plt-body-parent 的注释）。没有可并入的行，硬塞就会变成
+              // 在子任务列表中间插一行读数，比原来更乱。
+              // 所以这里的取舍是：单任务合进「计划」排（题面明确要求），
+              // 批次维持原样。等批次有了自己的标题行再说，不为对齐而制造新的一行。
               h(
                 'div',
                 { className: 'plt-meta' },
@@ -629,20 +764,43 @@
                   // id=374：待执行（todo）的整批删除也搬到头部了，原因同上 ——
                   // 而且这一档还要求「拆分的与单任务一视同仁」，所以两者的删除
                   // 必须落在同一个位置（头部右端），不能再一个在头、一个在底。
-                  // 只剩待审核 / 草稿两档仍把「删除整批」留在这里：
-                  // 它们的头部没有删除图标，删掉这一颗就真的没入口了。
-                  running || groupKey === 'reviewed' || groupKey === 'todo'
+                  // id=382：待审核这一档的两颗按钮改成**图标**，且并排放在同一排里：
+                  //   [✓ 通过] [🗑 删除整批]
+                  // 两者共用 .plt-icon-btn 的尺寸与热区、共用同一套 hover/disabled 规则，
+                  // 只有颜色不同（通过走主色、删除走删除色），右对齐与间距由 .plt-actions 保证。
+                  //
+                  // 为什么这一档要改：待审核是唯一「两个动作都高频」的分组 ——
+                  // 一条看完要么通过、要么删掉重写。原来是「头部通过 + 底部删除整批」，
+                  // 一个在上一行、一个在下一行，且一个是胶囊一个是文字，扫视时对不齐。
+                  // 收进同一排之后，一行就是一次决策。
+                  //
+                  // id=386：待审核**不再提供删除入口**（题面：将删除功能去除）。
+                  //   这一档只保留「通过」——审核的唯一动作就是把这条标成已通过。
+                  //   想删的话，正确路径是先在别处处理它再删，
+                  //   而不是在「正在评审」的这一步顺手把证据删掉。
+                  //   一并说明：删掉图标之后，这一档**不能**再落到下面那个
+                  //   「文字删除」的兜底分支（否则只是把图标换回文字，等于没删）——
+                  //   所以兜底条件里也加上了 groupKey === 'unreviewed'。
+                  // id=390：这一档的「通过」也已搬到**头部**（见上方 plt-head-pass-btn）。
+                  // 展开区因此**什么都不画** —— 待审核卡片的操作全部收在头部，
+                  // 展开只是用来看正文，不再承载动作。
+                  // 仍然保留 groupKey === 'unreviewed' 分支（返回 null）而不是删掉它：
+                  // 让下面那个 `: running || ...` 的兜底条件无需再改一次，
+                  // 也让「待审核这一档由谁处理」在代码里仍然一目了然。
+                  groupKey === 'unreviewed'
                     ? null
-                    : h(
-                        'button',
-                        {
-                          className: 'plt-btn plt-del',
-                          disabled: busy,
-                          'data-tip': '删除整批：父节点与它的全部子任务一起删掉',
-                          onClick: onRemove,
-                        },
-                        '删除整批',
-                      ),
+                    : running || groupKey === 'reviewed' || groupKey === 'todo'
+                      ? null
+                      : h(
+                          'button',
+                          {
+                            className: 'plt-btn plt-del',
+                            disabled: busy,
+                            'data-tip': '删除整批：父节点与它的全部子任务一起删掉',
+                            onClick: onRemove,
+                          },
+                          '删除整批',
+                        ),
                 ),
               ),
             )
@@ -657,35 +815,23 @@
                   'div',
                   { className: 'plt-sec-h' },
                   h('span', null, '计划'),
-                  // 「计划」标题右侧：编辑（仅草稿）、复制内容、复制 ID。
+                  // 「计划」标题右侧：复制内容、复制 ID。
                   h(
                     'span',
                     { className: 'plt-copy' },
-                    editable === true
-                      ? h(
-                          'button',
-                          {
-                            className: `plt-copy-btn${editing ? ' done' : ''}`,
-                            'data-tip': editing ? '收起编辑框' : '直接编辑这条草稿的内容',
-                            onClick: (e) => {
-                              e.stopPropagation()
-                              if (editing) void stopEditing(false)
-                              else {
-                                const text = String(planText ?? '')
-                                openedRef.current = text
-                                savedRef.current = text
-                                pendingRef.current = null
-                                setDraftText(text)
-                                setSaveState('idle')
-                                setEditing(true)
-                              }
-                            },
-                          },
-                          h(EditIcon, { size: 12 }),
-                          h('span', null, editing ? '收起' : '编辑'),
-                        )
-                      : null,
-                    canCopyId === true
+                    // id=405：草稿就地编辑入口已随草稿模式删除。
+                    // id=389/393/396：待审核、待执行、已审核这三组的复制按钮都已搬到**头部**
+                    //（见上方 plt-head-copies）。
+                    // 这里跳过它们，避免同一张卡上出现两个复制入口 ——
+                    // 这两个动作在逐条扫读时是高频的，放头部就够得着，
+                    // 展开区这一排因此只剩「提示词」那类补充复制。
+                    // （id=405：草稿组已删除。）
+                    //
+                    // 三处条件必须与头部那个 `groupKey === 'unreviewed' || groupKey === 'todo'
+                    // || groupKey === 'reviewed'` 保持一致 —— 否则会出现「头部有、展开区也有」
+                    //（重复）或「两边都没有」（入口消失）。改一处就要改三处，
+                    // 这是这段唯一的维护要点。
+                    (groupKey === 'unreviewed' || groupKey === 'todo' || groupKey === 'reviewed' ? null : canCopyId === true)
                       ? h(
                           'button',
                           {
@@ -700,7 +846,7 @@
                           h('span', null, copied === 'id' ? '已复制' : 'ID'),
                         )
                       : null,
-                    canCopyPlan === true
+                    (groupKey === 'unreviewed' || groupKey === 'todo' || groupKey === 'reviewed' ? null : canCopyPlan === true)
                       ? h(
                           'button',
                           {
@@ -731,73 +877,42 @@
                           h('span', null, copied === 'prompt' ? '已复制' : '提示词'),
                         )
                       : null,
-                    // id=368：「通过」已经从这一排搬到**头部**（见上面那颗 plt-head-pass）。
-                    // 这里不再画第二颗 —— 同一屏出现两个「通过」，一个在收起时可见、
-                    // 一个展开后才出现，用户会犹豫该点哪个，而它们其实是同一个动作。
+                    // id=382：「通过」现在在**底部操作区**，与「删除」并排成一对图标
+                    //（见这一排上方 plt-actions 那段）。这里（展开区的复制按钮排）
+                    // 本来就没有它 —— 第 368 号曾把它搬去头部，第 382 号又搬到下面；
+                    // 两次都只留一个入口，理由一致：同一屏出现两个「通过」会让人犹豫。
                     // 展开区的这一排保留复制类按钮（ID / 内容 / 提示词），它们仍然需要在
                     // 读到正文之后才用得上。
                   ),
+                  // id=395：创建 / 开始 / 耗时这些「时间戳」从原来**独占一行**的
+                  // .plt-meta 搬到「计划」这一排的**右侧**（题面要求）。
+                  //
+                  // 为什么合进来：那行元信息本来就只有三四个短片段，
+                  // 独占一行等于在「计划」标题和正文之间插了一条几乎空着的横带 ——
+                  // 一行只为了放「创建：2026/10/30」。而「计划」标题右侧现在
+                  // 只有复制类按钮（高频动作都已搬到头部，见 id=389/393/394），
+                  // 那一侧本来就有富余空间，正好收进来。
+                  //
+                  // 位置放在 .plt-copy **之后**：复制按钮是操作，时间戳是说明性的读数，
+                  // 读数该在操作更外侧（贴着行尾），这样整行读起来是
+                  // 「计划 [复制…] [创建…]」，操作集中、说明收口。
+                  // 形态用 .plt-sec-meta（见 15-detail.js）：更小的字号 + 更淡的颜色，
+                  // 明确它是「附注」而不是和标题同级的第二个标题。
+                  // 它在 .plt-sec-h 内部 → 与标题、复制按钮同一行（flex + align-items:center），
+                  // 不会因为换行把这一排撑成两行（.plt-sec-h 本身不换行）。
+                  h(
+                    'span',
+                    { className: 'plt-sec-meta' },
+                    item.mode ? h('span', null, `模式：${item.mode}`) : null,
+                    h('span', null, `创建：${fmtDate(item.createdAt) || '—'}`),
+                    item.startedAt ? h('span', null, `开始：${fmtDate(item.startedAt)}`) : null,
+                    time ? h('span', null, `耗时：${time}`) : null,
+                  ),
                 ),
-                editable === true && editing
-                  ? h(
-                      'div',
-                      { className: 'plt-edit-box', onClick: (e) => e.stopPropagation() },
-                      h('textarea', {
-                        className: 'plt-input plt-edit-input',
-                        value: draftText,
-                        rows: 6,
-                        spellCheck: false,
-                        placeholder: '草稿内容，随时可以再改（停手自动保存）',
-                        onChange: (e) => onEditChange(e.target.value),
-                      }),
-                      h(
-                        'div',
-                        { className: 'plt-edit-actions' },
-                        // 正文左侧：任务类型切换（修改 / 目标 / 仅回答），改完立即落盘。
-                        h(
-                          'div',
-                          { className: 'plt-edit-types' },
-                          ['修改', '目标', '仅回答'].map((type) =>
-                            h(
-                              'button',
-                              {
-                                key: type,
-                                type: 'button',
-                                className: `plt-chip plt-chip-sm${item.taskType === type ? ' active' : ''}`,
-                                disabled: busy,
-                                'data-tip': `任务类型：${type}`,
-                                onClick: (e) => {
-                                  e.stopPropagation()
-                                  onPatch({ taskType: type })
-                                },
-                              },
-                              h('span', { className: 'plt-chip-ico' }, h(ModeIcon, { kind: type, size: 12 })),
-                              h('span', { className: 'plt-chip-txt' }, type),
-                            ),
-                          ),
-                        ),
-                        // 编辑即保存：这里只显示保存状态，没有「保存」按钮。
-                        h(
-                          'span',
-                          { className: `plt-save-state ${saveState}`, 'aria-live': 'polite' },
-                          saveState === 'pending' ? '待保存…' : saveState === 'saving' ? '保存中…' : saveState === 'saved' ? '已自动保存' : saveState === 'error' ? '保存失败，再改一下重试' : '停手即自动保存',
-                        ),
-                        h(
-                          'button',
-                          {
-                            className: 'plt-btn',
-                            disabled: busy || saveState === 'saving',
-                            'data-tip': '放弃这次修改，还原成进入编辑时的内容',
-                            onClick: (e) => {
-                              e.stopPropagation()
-                              void stopEditing(true)
-                            },
-                          },
-                          '取消',
-                        ),
-                      ),
-                    )
-                  : h('div', { className: 'plt-plan' }, planText || '（空）'),
+                // id=405：草稿就地编辑框（textarea + 任务类型切换 + 保存状态 + 取消）
+                // 随草稿模式一并删除 —— 它只在 editable（草稿组）时渲染。
+                // 现在正文一律只读展示，与其它组一致。
+                h('div', { className: 'plt-plan' }, planText || '（空）'),
               ),
               noteText
                 ? h('div', { className: 'plt-sec' }, h('div', { className: 'plt-sec-h' }, '备注 / 执行结果'), h('div', { className: 'plt-note' }, noteText))
@@ -809,13 +924,15 @@
               // 默认折叠：原文可能很长（整段需求），默认铺开会把卡片撑得很长，
               // 用户是来看「做完了没」的，不是来重读需求的 —— 想看得自己点开。
               //
-              // id=375 补一句：上面这段理由现在**只适用于单任务**。
-              // 拆解批次的默认值改成了「待执行组里默认展开」（见 Item 顶部
-              // sourceOpen 那段注释）。这里是单任务那条渲染路径 —— 单任务没有
-              // 子任务列表，展开区里就只剩这段原文，标题又已经压自同一段提示词，
-              // 默认展开只是把卡片撑成两倍高、信息还是重复的，所以保持折叠。
-              // 两条路径共用一个 sourceOpen，但默认值按 isParent 分派，
-              // 因此这里渲染出的仍然是折叠态（除非用户自己点开）。
+              // id=375：上面这段理由现在**只适用于单任务的待执行档**。
+              // id=387：待审核里的（含单任务）也默认展开了 —— 审核要对照原始需求，
+              // 那段原文正是判断依据，藏在折叠里等于让人先点开再评审。
+              // 现在两档默认展开、两档默认折叠：
+              //   展开 = 待执行里的批次（id=375）｜ 待审核里的全部（id=387）
+              //   折叠 = 已审核里的全部 ｜ 待执行里的单任务
+              // 这里（单任务渲染路径）在待审核组里因此是**展开**的：
+              // 两条路径共用同一个 sourceOpen，默认值在 Item 顶部统一算，
+              // 本处不做第二次判断 —— 否则「默认值」与「渲染条件」会变成两处口径。
               (sourceText !== '' || (loaded === null && sourceLen > 0))
                 ? h(
                     'div',
@@ -848,14 +965,6 @@
                 : null,
               h(
                 'div',
-                { className: 'plt-meta' },
-                item.mode ? h('span', null, `模式：${item.mode}`) : null,
-                h('span', null, `创建：${fmtDate(item.createdAt) || '—'}`),
-                item.startedAt ? h('span', null, `开始：${fmtDate(item.startedAt)}`) : null,
-                time ? h('span', null, `耗时：${time}`) : null,
-              ),
-              h(
-                'div',
                 { className: 'plt-checks' },
                 // 「已执行」是模型自动回填的只读状态，三组都不再重复展示。
                 showExecute === false
@@ -873,35 +982,14 @@
                     ),
                 // 「审核通过」已按 id=193 搬到「计划」标题行的「提示词」之后（改名「通过」、
                 // 复用 .plt-copy-btn），这里不再重复放一个入口，免得一张卡上两个审核按钮。
-                // 「转为待执行 / 转为草稿 / 删除」统一收进右侧的 .plt-actions，
-                // 草稿组里「转为待执行」和「删除」因此挨在一起，不再被 margin-left:auto 拉开。
+                // 「删除」统一收进右侧的 .plt-actions。
                 h(
                   'div',
                   { className: 'plt-actions' },
-                  // 草稿：给一个「转为待执行」，点一下才正式排队（草稿本身不参与执行）。
-                  status.key === 'draft'
-                    ? h(
-                        'button',
-                        {
-                          className: 'plt-btn plt-promote',
-                          disabled: busy,
-                          'data-tip': '转为待执行：退出草稿，排进执行队列',
-                          onClick: (e) => {
-                            e.stopPropagation()
-                            onPromote()
-                          },
-                        },
-                        '转为待执行',
-                      )
-                    : null,
-                  // id=376：「转为草稿」已搬到头部（见上方那颗 plt-head-demote），
-                  // 这里不再重复画一颗。搬运的理由与删除那颗一样 ——
-                  // 待执行是逐条排队的清单，用户要先把不合意的几条退回去，
-                  // 这不需要先展开卡片读正文；而且拆分的批次与单任务的
-                  // 位置必须一致（题面要求），否则又变成两套记法。
-                  // 与其他「已搬到头部」的按钮不同，这一颗不保留任何兜底：
-                  // 它只在待执行组出现，而待执行组的头部一定画得出来
-                  //（canDemote 与头部那颗用的是同一个条件）。
+                  // id=405：原来这里有一颗「转为待执行」（仅草稿组）。
+                  // 草稿模式整体移除后它没有对象了 —— 不存在「在草稿里等人捞出来」的条目。
+                  // id=376：「转为草稿」曾搬到头部，
+                  // 这里不再重复画一颗。id=405 起那颗也随草稿模式删除了。
                   /**
                    * id=374：待执行的删除入口已从这一排**上移到头部右端**
                    *（见上方那颗 plt-head-del 的注释），这里不再重复画一颗。
@@ -915,25 +1003,39 @@
                    * .plt-icon-btn / .plt-trash 这两个类没有废弃：头部那颗仍在用它们，
                    * 尺寸与删除色同源，只是挪了宿主节点。
                    */
-                  // 执行中的条目整排操作都不给：转草稿/删除直接隐藏，不留灰按钮。
+                  // 执行中的条目整排操作都不给：删除直接隐藏，不留灰按钮。
                   // 待执行栏的删除已经在头部（id=374），这里不再重复放文字按钮 ——
                   // 一栏只留一个删除入口，免得用户犹豫该点哪个。
                   // id=359：已审核那一档的删除也在头部（plt-head-del）。
                   // 于是头部有删除图标的两档（待执行 / 已审核）底部都不再画；
-                  // 待审核 / 草稿两档的头部没有删除图标，底部这颗必须留着，
+                  // 待审核档的头部没有删除图标，底部这颗必须留着，
                   // 否则这两个入口就真的丢了。
-                  running === true || groupKey === 'todo' || groupKey === 'reviewed'
+                  // id=382：待审核（非批次）这一档的两颗按钮也改成图标，并排在同一排：
+                  //   [✓ 通过] [🗑 删除]
+                  // 与父批次那条路径保持完全一样的形态 —— 一张卡上是批次还是单条，
+                  // 用户不该看出两种排法。
+                  //
+                  // id=390：这一档的「通过」也已搬到**头部**（见上方 plt-head-pass-btn）。
+                  // 展开区因此什么都不画 —— 待审核卡片的操作全部收在头部。
+                  // 条件与头部那颗一致（isParent !== true 时看 showReview 与 running）。
+                  // 行为一字未改：仍是 onPatch({ review: true })。
+                  // id=386：删除按钮已去掉（题面「将删除功能去除」）。
+                  // 保留这个分支（返回 null）而不是删掉它：让下面那个兜底条件无需再改，
+                  // 也让「待审核这一档由谁处理」在代码里仍然一目了然。
+                  groupKey === 'unreviewed'
                     ? null
-                    : h(
-                        'button',
-                        {
-                          className: 'plt-btn plt-del',
-                          disabled: busy,
-                          'data-tip': '删除这条计划',
-                          onClick: onRemove,
-                        },
-                        '删除',
-                      ),
+                    : running === true || groupKey === 'todo' || groupKey === 'reviewed'
+                      ? null
+                      : h(
+                          'button',
+                          {
+                            className: 'plt-btn plt-del',
+                            disabled: busy,
+                            'data-tip': '删除这条计划',
+                            onClick: onRemove,
+                          },
+                          '删除',
+                        ),
                 ),
               ),
             )

@@ -36,7 +36,12 @@ function declarations() {
     for (const [re, kind] of [[fn, 'fn'], [cst, 'const']]) {
       let m
       while ((m = re.exec(text)) !== null) {
-        if (!found.has(m[1])) found.set(m[1], { file, kind })
+        if (found.has(m[1])) continue
+        // 声明上方若带 @public（在紧邻的 JSDoc/注释里），视为「对外导出」——
+        // 它可能暂时没有调用方（例如刚建立的工具模块），不该报死代码。
+        const head = text.slice(Math.max(0, m.index - 600), m.index)
+        const isPublic = /\*[\s\S]*@public[\s\S]*\*\/\s*$/.test(head) || /@public[^\n]*\n\s*$/.test(head)
+        found.set(m[1], { file, kind, isPublic })
       }
     }
   }
@@ -53,6 +58,7 @@ const suspects = []
 for (const [name, info] of declarations()) {
   // 出现 1 次 = 只有声明本身；导出列表里的重复出现会算第 2 次，所以宿主侧
   // 额外把「只在 export { } 里出现过一次」的情况也抓出来。
+  if (info.isPublic === true) continue
   if (occurrences(name) <= 1) suspects.push({ name, ...info, hits: 1 })
 }
 

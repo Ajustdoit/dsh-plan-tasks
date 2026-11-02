@@ -1,6 +1,12 @@
 /**
  * 死样式扫描：找出 CSS 里定义了、但 JS 从来没挂到 DOM 上的 `.plt-*` 类。
  *
+ * id=79-C 之后，样式的**定义**在 `src/styles/*.css`（不再藏在 JS 字符串里），
+ * 而**引用**仍在 `src/client/*.js`。所以两边要分别扫：
+ *   定义 ← src/styles
+ *   引用 ← src/client
+ * 早先两者都在 src/client 下（CSS 片段也是 .js），现在分开了。
+ *
  * 为什么需要它：客户端样式是纯字符串，删掉一条错误的规则不会报错，
  * 只会在若干次重构后攒下一堆「看着像在用、其实早没人用」的死规则。
  * 这个脚本把「定义」与「引用」对一遍，再排除动态拼接（`plt-group-${key}`）
@@ -13,7 +19,8 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 const ROOT = 'src/client'
-const CSS_DIR = '20-css'
+// 样式定义所在的目录（id=79-C 起）。扫 .css，不再是 .js 片段。
+const CSS_ROOT = 'src/styles'
 
 function walk(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -21,17 +28,17 @@ function walk(dir) {
   )
 }
 
-const files = walk(ROOT).filter((f) => f.endsWith('.js'))
-const isCss = (f) => f.split(/[\\/]/).includes(CSS_DIR)
 const read = (list) => list.map((f) => readFileSync(f, 'utf8')).join('\n')
-const cssFiles = files.filter(isCss)
-const js = read(files.filter((f) => !isCss(f)))
+// 定义：src/styles/*.css
+const cssFiles = walk(CSS_ROOT).filter((f) => f.endsWith('.css'))
+// 引用：src/client/**/*.js
+const js = read(walk(ROOT).filter((f) => f.endsWith('.js')))
 
 /** 类名 → 第一次定义它的片段，便于直接跳到源头删。 */
 const defined = new Map()
 for (const file of cssFiles) {
   for (const m of readFileSync(file, 'utf8').matchAll(/\.(plt-[a-z0-9-]+)/g)) {
-    if (!defined.has(m[1])) defined.set(m[1], relative(ROOT, file))
+    if (!defined.has(m[1])) defined.set(m[1], relative(CSS_ROOT, file))
   }
 }
 

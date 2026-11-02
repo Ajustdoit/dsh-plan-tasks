@@ -1,9 +1,33 @@
-    /**
-     * 浅色主题覆盖：全部 body:not([data-ds-dark-theme]) 规则。
-     *
-     * 必须在全部深色基础片段之后拼接 —— 覆盖靠「同特异度、后写者胜」，顺序错了浅色会立刻退回深色。
-     */
-    CSS_PARTS.push(`/* ============================================================
+/* ============================================================================
+ * DSH「任务列表」插件样式 · 第 3/3 段：主题覆盖（浅色）
+ * ============================================================================
+ *
+ * **本文件必须排在三段最后**，这不是排版偏好而是功能前提。
+ *
+ * 插件默认按**深色**写基础规则（面板在深色侧栏里），浅色主题靠这一整段
+ * 用 `body:not([data-ds-dark-theme])` 前缀**覆盖**。覆盖能生效靠两件事：
+ *   1. 前缀把特异度抬高（多一个属性选择器）；
+ *   2. 同特异度时「后写者胜」—— 所以它在文件里必须靠后。
+ * `build.mjs` 按文件名字典序拼接，`03-` 前缀把它钉在最后。
+ *
+ * ── 只写「与深色不同的部分」 ───────────────────────────────────────────────
+ * 这是本段的铁律。深色侧已经写对的属性，这里一个都不要重复，
+ * 否则同一个值要在两处维护，迟早不一致。
+ *
+ * ── 为什么单独一段而不是散在各处 ───────────────────────────────────────────
+ * 早先的 30-light.js 就是这么做的（137 条规则集中在一个片段）。
+ * 好处是「调浅色」只需看一个文件，坏处是它必须知道深色侧写了什么 ——
+ * 76 个 `body:not(...)` 里有一批是为修对比度而压低色值的，
+ * 改深色侧的颜色时容易忘记同步这里。搬运时保留原有的 id 注释，别删，
+ * 那些注释记录了「为什么这个值要被压深」。
+ * ========================================================================== */
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【13】浅色 · 面板与顶栏
+ * 源：20-css/30-light.js 的前段（面板根、标题、按钮、图标、输入区）
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* ============================================================
    主题变量兜底（只补浅色）
    ------------------------------------------------------------
    这个插件的样式引用了几个简写 token（--dsw-alias-bg-primary /
@@ -54,18 +78,10 @@ body:not([data-ds-dark-theme]) .plt-group-reviewed{--plt-accent:96,106,122}
    alpha=1 时 5.25、组头 5.49，标签底也跟着变浅，仍然是同一个橙色相。 */
 body:not([data-ds-dark-theme]) .plt-group-unreviewed{--plt-accent:138,95,6}
 /* id=228：原本 31,111,208 太亮，「复制提示词」这类 accent@1 的文字落在 accent@.055 的卡片底上
-   只有 4.39:1（同色系浅底压浅字）。压深一档到 #175aac，同色相不变、明度降一档，比值抬到 6 以上。 */
-body:not([data-ds-dark-theme]) .plt-group-todo{--plt-accent:23,90,172}
-/* 草稿组：浅色下用深一点的绿，浅底上才看得见。id=226：22,140,74 只有 4.0:1，
-   压到 17,107,54 后 6.14:1，同时把沿用旧色号的标签一起换过来。 */
-body:not([data-ds-dark-theme]) .plt-group-draft{--plt-accent:17,107,54}
-body:not([data-ds-dark-theme]) .plt-group-draft .plt-tag.draft{background:rgba(17,107,54,.10);color:#116b36;border-color:rgba(17,107,54,.38)}
-body:not([data-ds-dark-theme]) .plt-group-draft .plt-tag.type{color:rgba(17,107,54,.9);border-color:rgba(17,107,54,.26)}
-body:not([data-ds-dark-theme]) .plt-tag.draft{background:rgba(17,107,54,.10);color:#116b36;border-color:rgba(17,107,54,.38)}
-body:not([data-ds-dark-theme]) .plt-draft-toggle{color:#5b6472;border-color:rgba(20,40,70,.22)}
-body:not([data-ds-dark-theme]) .plt-draft-toggle:hover:not(:disabled){background:rgba(20,40,70,.07);border-color:rgba(20,40,70,.34)}
-body:not([data-ds-dark-theme]) .plt-draft-toggle.on{background:#178a48;box-shadow:0 2px 6px -2px rgba(22,140,74,.5),inset 0 1px 0 rgba(255,255,255,.25)}
-body:not([data-ds-dark-theme]) .plt-draft-toggle.on:hover:not(:disabled){background:#12743c}
+   只有 4.39:1（同色系浅底压浅字）。压深一档到 #175aac，同色相不变、明度降一档，比值抬到 6 以上。
+   id=406：待执行改绿后换成 22,101,52（#166534）；id=78-B/C 又统一改为红色变量，见 01-base.css 的【1.5】。
+   同时把沿用旧色号的标签一起换过来。 */
+body:not([data-ds-dark-theme]) .plt-group-todo{--plt-accent:var(--plt-todo,46,160,67)}
 body:not([data-ds-dark-theme]) .plt-deep-toggle{color:#5b6472;border-color:rgba(20,40,70,.22)}
 body:not([data-ds-dark-theme]) .plt-deep-toggle:hover:not(:disabled){background:rgba(20,40,70,.07);border-color:rgba(20,40,70,.34)}
 body:not([data-ds-dark-theme]) .plt-deep-toggle.on{background:#4a54c8;box-shadow:0 2px 6px -2px rgba(74,84,200,.5),inset 0 1px 0 rgba(255,255,255,.25)}
@@ -85,13 +101,26 @@ body:not([data-ds-dark-theme]) .plt-auto.on{color:#1a5db8;border-color:rgba(26,9
    换成饱和一点的绿 / 橙，并把文字压深 —— 白底上 .plt-btn 的继承色足够，
    但 hover 时底色变浅会显得字发飘，所以显式钉一次。
    id=354 起两者互斥渲染，同一条规则只会命中屏幕上唯一那颗按钮。 */
-body:not([data-ds-dark-theme]) .plt-start:not(:disabled):hover{background:rgba(34,150,84,.12);border-color:rgba(28,124,62,.46);color:#14663a}
-body:not([data-ds-dark-theme]) .plt-pause:not(:disabled):hover{background:rgba(216,120,32,.12);border-color:rgba(176,94,20,.46);color:#8a4a0e}
+/* id=85-B：开始按钮的绿改用 --plt-todo 变量（与深色同一条），不再硬编码。
+   浅色档 --plt-todo 已压到 #166534（7.13:1），白底上够深，不需要再单独调一个值。
+   文字色用更深的 fg 变体：hover 时底色是 .12 透明度的浅绿，
+   主色压在上面只有 5.02:1，而 fg（#14532d）能到 7.9:1。 */
+body:not([data-ds-dark-theme]) .plt-start:not(:disabled):hover{background:rgba(var(--plt-todo,46,160,67),.12);border-color:rgba(var(--plt-todo,46,160,67),.5);color:rgb(var(--plt-todo-fg,187,247,208))}
+/* id=88-B：暂停 hover 的白底配色改用 --plt-run 变量（原来是硬编码 216,120,32）。
+   浅色档 --plt-run 是深黄 #a16207，白底上 4.92:1，不需要再单独调一个值。 */
+body:not([data-ds-dark-theme]) .plt-pause:not(:disabled):hover{background:rgba(var(--plt-run,255,214,10),.10);border-color:rgba(var(--plt-run,255,214,10),.5);color:rgb(var(--plt-run-fg,255,233,138))}
 /* 开始 / 暂停的状态色（id=210）浅色态：深色主题的亮蓝 / 亮琥珀在 #fdfefe 上几乎看不见，
    换成各自的深色系；禁用态沿用同一个 opacity，不另外调。 */
 body:not([data-ds-dark-theme]) .plt-start.is-resume:not(:disabled){color:#17539e;border-color:rgba(31,111,208,.46);background:rgba(31,111,208,.10)}
 body:not([data-ds-dark-theme]) .plt-start.is-resume:not(:disabled):hover{background:rgba(31,111,208,.17);border-color:rgba(31,111,208,.62)}
 body:not([data-ds-dark-theme]) .plt-pause:not(:disabled){color:#8a4a0e;border-color:rgba(176,94,20,.44)}
+/* id=88-B：浅色禁用态的 hover 清除（与深色段对称）。
+   否则白底上禁用按钮悬停仍会泛出淡红，看着像能点。 */
+body:not([data-ds-dark-theme]) .plt-start:disabled:hover,
+body:not([data-ds-dark-theme]) .plt-pause:disabled:hover{background:transparent;border-color:var(--dsw-alias-border-secondary,rgba(20,40,70,.22))}
+/* id=88-B：浅色 focus-visible 用更深的轮廓，白底上才看得清。 */
+body:not([data-ds-dark-theme]) .plt-start:focus-visible,
+body:not([data-ds-dark-theme]) .plt-pause:focus-visible{outline-color:var(--dsw-alias-border-accent,rgba(31,111,208,.8))}
 body:not([data-ds-dark-theme]) .plt-top.has-error .plt-start,
 body:not([data-ds-dark-theme]) .plt-top.has-error .plt-pause{border-color:rgba(198,40,40,.46)}
 
@@ -128,76 +157,134 @@ body:not([data-ds-dark-theme]) .plt-op{color:#59606c;opacity:.75}
 /* 组头是 sticky 的，浅色下面板底色是白的，半透明会让滚动的内容透上来，压成接近实白。 */
 body:not([data-ds-dark-theme]) .plt-group-h{background:rgba(250,252,255,.94);border-color:rgba(20,40,70,.26)}
 body:not([data-ds-dark-theme]) .plt-group-h:hover{background:rgba(226,236,248,.96)}
+
+/* id=Kp86HX：浅色档的**待执行组**要能看出绿。
+ *
+ * 深色档的修法（提高 accent 透明度）在浅色档不管用 —— 上面那条
+ * `body:not([data-ds-dark-theme]) .plt-group-h{background:rgba(250,252,255,.94)}`
+ * 是**不透明的近白**，权重 [0,2,1]，而 `.plt-group-h{background:rgba(var(--plt-accent,140,140,140),.055)}`
+ * 只有 [0,1,0] —— 浅色主题下三组组头**都是同一片白**，accent 一个都看不见。
+ *
+ * 为什么不能简单改成半透明：组头是 sticky 的，浅色面板底下是白，
+ * 半透明会让滚动的内容透上来（这正是上面那条规则存在的原因）。
+ *
+ * 所以做法是「保持不透明，但把白色**染绿**」：
+ * 用极淡的绿调白（#f2fbf4 一档），既挡住滚动内容，又能看出这是绿色分组。
+ * 边框同理加深一档，让组的边界也带绿。 */
+body:not([data-ds-dark-theme]) .plt-group-todo .plt-group-h{
+  background:color-mix(in srgb, rgb(var(--plt-todo,46,160,67)) 8%, #ffffff);
+  border-color:rgba(var(--plt-todo,46,160,67),.38);
+}
+body:not([data-ds-dark-theme]) .plt-group-todo .plt-group-h:hover{
+  background:color-mix(in srgb, rgb(var(--plt-todo,46,160,67)) 13%, #ffffff);
+}
+/* 组容器：浅色下补一层淡绿边框 + 极淡绿底，让整块有实体感。 */
+body:not([data-ds-dark-theme]) .plt-group-todo{
+  /* id=Vrfpg7-B：边框透明度对齐带审核的 .3（原 .34）。
+     底色仍用 color-mix 4%（与 .plt-group.open 的 --plt-accent .035 同一浓度档，
+     只是浅色下用 color-mix 更容易与白底混合出稳定的观感）。 */
+  border-color:rgba(var(--plt-todo,46,160,67),.3);
+  background:color-mix(in srgb, rgb(var(--plt-todo,46,160,67)) 4%, #ffffff);
+}
 body:not([data-ds-dark-theme]) .plt-group-reviewed,
 body:not([data-ds-dark-theme]) .plt-group-unreviewed,
 body:not([data-ds-dark-theme]) .plt-group-todo{box-shadow:0 1px 2px rgba(16,32,64,.05),0 6px 16px -12px rgba(16,36,72,.22)}
 body:not([data-ds-dark-theme]) .plt-group-reviewed:hover,
 body:not([data-ds-dark-theme]) .plt-group-unreviewed:hover,
-body:not([data-ds-dark-theme]) .plt-group-todo:hover{box-shadow:0 1px 3px rgba(16,32,64,.07),0 10px 22px -14px rgba(16,36,72,.26),0 0 18px -12px rgba(var(--plt-accent),.5)}
-body:not([data-ds-dark-theme]) .plt-group.open{box-shadow:0 2px 4px rgba(16,32,64,.07),0 16px 34px -18px rgba(16,36,72,.26),0 0 0 1px rgba(var(--plt-accent),.12)}
+body:not([data-ds-dark-theme]) .plt-group-todo:hover{box-shadow:0 1px 3px rgba(16,32,64,.07),0 10px 22px -14px rgba(16,36,72,.26),0 0 18px -12px rgba(var(--plt-accent,140,140,140),.5)}
+body:not([data-ds-dark-theme]) .plt-group.open{box-shadow:0 2px 4px rgba(16,32,64,.07),0 16px 34px -18px rgba(16,36,72,.26),0 0 0 1px rgba(var(--plt-accent,140,140,140),.12)}
 /* id=239：浅色下收起态的「干活中」流光。深色那套是往黑底上打亮光，浅底上反过来 ——
    外发光要淡（白底上重投影会糊），描边要实（对比度参考 id=227 的 1.5:1 门槛），
    扫过的那道高光保留 accent 本色 + 一段近白，走起来才看得见。 */
-body:not([data-ds-dark-theme]) .plt-group.is-running:not(.open){border-color:rgba(var(--plt-accent),.62);box-shadow:0 1px 2px rgba(16,32,64,.05),0 6px 16px -12px rgba(16,36,72,.22),0 0 16px -8px rgba(var(--plt-accent),.42)}
 /* 注意 background 是简写，会把基础规则里的 background-size:240% 一起重置回 auto ——
    那样 background-position 动画就没得走（光带会静止）。所以这里必须把尺寸与重复方式补回来。 */
-body:not([data-ds-dark-theme]) .plt-group.is-running:not(.open)::after{background:linear-gradient(100deg,transparent 18%,rgba(var(--plt-accent),.22) 34%,rgba(var(--plt-accent),.98) 48%,#ffffff 52%,rgba(var(--plt-accent),.98) 56%,rgba(var(--plt-accent),.22) 70%,transparent 86%);background-size:240% 100%;background-repeat:no-repeat}
-@media (prefers-reduced-motion: reduce){body:not([data-ds-dark-theme]) .plt-group.is-running:not(.open)::after{animation:none;background:linear-gradient(180deg,rgba(var(--plt-accent),.9),rgba(var(--plt-accent),.35));background-size:100% 100%}}
+@media (prefers-reduced-motion: reduce){}
 
 /* —— 条目底色：白色半透明 → 极淡的深色，浅底下才看得见边界 —— */
 body:not([data-ds-dark-theme]) .plt-item{background:var(--dsw-alias-bg-primary,#fff)}
-body:not([data-ds-dark-theme]) .plt-group-body .plt-item{background:rgba(var(--plt-accent),.055);border-color:rgba(var(--plt-accent),.32)}
+body:not([data-ds-dark-theme]) .plt-group-body .plt-item{background:rgba(var(--plt-accent,140,140,140),.055);border-color:rgba(var(--plt-accent,140,140,140),.32)}
 /* id=227：卡片头与正文之间的分割线（基础样式是 accent@.14，白底上几乎看不见）。 */
-body:not([data-ds-dark-theme]) .plt-group-body .plt-body{border-top-color:rgba(var(--plt-accent),.34)}
+body:not([data-ds-dark-theme]) .plt-group-body .plt-body{border-top-color:rgba(var(--plt-accent,140,140,140),.34)}
 
 /* —— 文字在浅底上要压深，不能沿用深色主题的「提亮」 —— */
 body:not([data-ds-dark-theme]) .plt-head:hover .plt-name{color:var(--dsw-alias-label-primary,#141a22)}
-body:not([data-ds-dark-theme]) .plt-tag.running{background:rgba(13,107,116,.12);color:#0d6b74;border-color:rgba(13,107,116,.44)}
-body:not([data-ds-dark-theme]) .plt-group-todo .plt-tag.todo{background:rgba(31,111,208,.08);color:#1a60b6;border-color:rgba(31,111,208,.26)}
-body:not([data-ds-dark-theme]) .plt-group-todo .plt-tag.type{color:rgba(23,83,158,.86);border-color:rgba(31,111,208,.26)}
-body:not([data-ds-dark-theme]) .plt-group-todo .plt-item.running .plt-name{color:#0d6b74;font-weight:600}
-body:not([data-ds-dark-theme]) .plt-group-todo .plt-item.running .plt-tag.running{background:rgba(13,107,116,.14);color:#0d6b74;border-color:rgba(13,107,116,.4)}
-body:not([data-ds-dark-theme]) .plt-group-todo .plt-item.running .plt-tag.todo{background:rgba(31,111,208,.08);color:#1a60b6;border-color:rgba(31,111,208,.26)}
-body:not([data-ds-dark-theme]) .plt-group-todo .plt-group-count{background:rgba(31,111,208,.10);color:#1a60b6;border-color:rgba(31,111,208,.26)}
+/* id=85-B：徽标文字与深色段统一改用 --plt-todo-fg（浅色 9.11:1）。
+   原来 .86 透明度是 5.11:1，虽达标但深浅两段用了不同手法；
+   统一成 fg 变体后两边都是"直接给一个能读的颜色"，不再靠调透明度凑对比。 */
+body:not([data-ds-dark-theme]) .plt-group-todo .plt-tag.type{color:rgb(var(--plt-todo-fg,187,247,208));border-color:rgba(var(--plt-todo,46,160,67),.3)}
+/* id=Vrfpg7-A：浅色主题下「卡片浮出绿底」的对应做法。
+ *
+ * 深色那套是「白色 .08 叠在绿上」，浅色这里不能照抄 ——
+ * 浅色的组容器本来就接近白（color-mix 4% 绿 + 白 = rgb(246,249,247)），
+ * 再叠白只会更白，差不到 10，卡片反而更糊。
+ *
+ * 浅色下改用**纯白卡 + 更实的绿边**：白纸片压在淡淡的绿底上，
+ * 层次靠"纯白 vs 近白绿"和那条绿边走。悬停时加一点极淡的绿晕，
+ * 与深色那边"悬停更亮"的手感对齐（这边是"更绿一点"）。 */
+body:not([data-ds-dark-theme]) .plt-group-todo .plt-item{
+  background:#ffffff;
+  /* id=Vrfpg7-B：边框透明度对齐带审核的 .18（原 .34）。 */
+  border-color:rgba(var(--plt-todo,46,160,67),.18);
+  /* id=Vrfpg7-C：浅色下同样去掉那块 20px 内发光。
+     通用规则里 `body:not(...) .plt-group-body .plt-item` 只覆盖了 background/border，
+     没覆盖 box-shadow —— 深色那条 inset 20px 会**原样延续到浅色**，
+     在白卡上摊成一块灰影。这里显式收敛成 1px 极淡内描边。 */
+  box-shadow:inset 0 0 0 1px rgba(var(--plt-todo,46,160,67),.06);
+}
+body:not([data-ds-dark-theme]) .plt-group-todo .plt-item:hover{
+  /* 4% 与组容器同色 → 悬停后卡片"消失"进组底（实测差 0）。
+     用 8% 才是"比组底更绿一档"，看得出响应。
+     id=Vrfpg7-B：边框同步对齐（.52 → .3，与深色那边同一档）。 */
+  background:color-mix(in srgb, rgb(var(--plt-todo,46,160,67)) 8%, #ffffff);
+  border-color:rgba(var(--plt-todo,46,160,67),.3);
+}
+body:not([data-ds-dark-theme]) .plt-group-todo .plt-group-count{background:rgba(var(--plt-todo,46,160,67),.10);color:rgb(var(--plt-todo-fg,187,247,208));border-color:rgba(var(--plt-todo,46,160,67),.26)}
 /* id=358 / id=368：浅色态的 .plt-tag.reviewed 与 .plt-tag.unreviewed 随节点一并删除
-   （这两个组里不再画状态徽标）。深色那侧同步删掉了，两边保持对称。 */
-body:not([data-ds-dark-theme]) .plt-tag.todo{background:rgba(120,130,145,.12);color:#5b6472;border-color:rgba(120,130,145,.41)}
+   （这两个组里不再画状态徽标）。深色那侧同步删掉了，两边保持对称。
+   id=401：待执行那档的文字标签也随节点删除。
+   id=407：随后连代替它的空心圆点也移除了（待执行不再画状态标记），
+   所以这里既没有文字徽标的浅色覆盖、也不需要圆点的浅色覆盖。 */
 /* id=233「已中断」：与 id=228 给「待审核」定的琥珀同一族，但底色更浅一档 ——
    待审核是「干完了等人看」，已中断是「没干完等人续」，两者不该看起来一样重。 */
-body:not([data-ds-dark-theme]) .plt-tag.interrupted{background:rgba(200,140,20,.10);color:#7c5405;border-color:rgba(200,140,20,.52)}
+/* mBSaIn：随深色段一起由琥珀改紫（白底上用更深的 #5b21b6，8.98:1）。 */
+body:not([data-ds-dark-theme]) .plt-tag.interrupted{background:rgba(91,33,182,.10);color:#5b21b6;border-color:rgba(91,33,182,.52)}
 body:not([data-ds-dark-theme]) .plt-tag.failed{background:rgba(180,60,50,.10);color:#8a2e28;border-color:rgba(180,60,50,.45)}
-/* id=226：基础样式是 rgba(var(--plt-accent),.85)，浅色下这条透明度会把文字再冲淡一层
+/* id=226：基础样式是 rgba(var(--plt-accent,140,140,140),.85)，浅色下这条透明度会把文字再冲淡一层
    （待执行组只剩 3.59:1）。浅色一律用实色，悬停反色那条保持原样。 */
-body:not([data-ds-dark-theme]) .plt-copy-btn{color:rgba(var(--plt-accent),1);border-color:rgba(var(--plt-accent),.32)}
-body:not([data-ds-dark-theme]) .plt-copy-btn:hover{background:rgba(var(--plt-accent),.12);border-color:rgba(var(--plt-accent),.5);color:var(--dsw-alias-label-primary,#141a22)}
-body:not([data-ds-dark-theme]) .plt-copy-btn:disabled:hover{color:rgba(var(--plt-accent),1)}
+body:not([data-ds-dark-theme]) .plt-copy-btn{color:rgba(var(--plt-accent,140,140,140),1);border-color:rgba(var(--plt-accent,140,140,140),.32)}
+body:not([data-ds-dark-theme]) .plt-copy-btn:hover{background:rgba(var(--plt-accent,140,140,140),.12);border-color:rgba(var(--plt-accent,140,140,140),.5);color:var(--dsw-alias-label-primary,#141a22)}
+body:not([data-ds-dark-theme]) .plt-copy-btn:disabled:hover{color:rgba(var(--plt-accent,140,140,140),1)}
 body:not([data-ds-dark-theme]) .plt-copy-btn.done{background:rgba(34,150,70,.12);border-color:rgba(34,150,70,.45);color:#116b36}
-/* id=373：头部「通过」在浅色下必须重新钉一次颜色。
-   这几条不是重复劳动 —— 上面 .plt-copy-btn 那组（id=226）是给**透明胶囊**写的：
-   color: accent 实色 + border-color: accent .32。头部那颗现在是实心主色块，
-   而 body:not([data-ds-dark-theme]) .plt-copy-btn:hover 的特异度 (0,3,0) 高于
-   .plt-head-pass:hover 的 (0,2,0) —— 不覆盖的话，白底主题下 hover 会把文字
-   刷成深蓝（label-primary）压在深蓝实心底上，几乎看不见。
-   所以这里把「白字 + 主色底 + 透明描边」按同样的特异度补一遍。
-   底面沿用 --dsw-alias-bg-accent：浅色主题里它已经是 #2f6fd0（白字对比 5.9:1），
-   不需要另设一个更深的蓝，也就不会和「发送」键分家。 */
-body:not([data-ds-dark-theme]) .plt-head-pass,
-body:not([data-ds-dark-theme]) .plt-head-pass:hover:not(:disabled),
-body:not([data-ds-dark-theme]) .plt-head-pass:active:not(:disabled),
-body:not([data-ds-dark-theme]) .plt-head-pass:disabled,
-body:not([data-ds-dark-theme]) .plt-head-pass:disabled:hover{background:var(--dsw-alias-bg-accent,#2f6fd0);border-color:transparent;color:#fff}
+/* id=382：浅色态的「通过」图标按钮。
+   id=392：原来这两条覆盖**已删除**，因为「通过」图标改成走本组的 --plt-accent 了。
+   浅色下待审核组的 --plt-accent 是 138,95,6（本节上面那行 remap），
+   所以深色那条规则取到的自动就是深琥珀。
+
+   id=404：**但 hover 态必须在这里补回来** —— 这是「任务 45 没改到」的真正原因。
+   深色那侧的 hover 是 '.plt-icon-btn.plt-pass-icon:hover:not(:disabled)'，
+   类级权重 3（2 类 + :hover）、元素级 0。
+   而本节上面有一条浅色基础规则：
+
+     body:not([data-ds-dark-theme]) .plt-btn:hover:not(:disabled){background:…灰…}
+
+   它的类级权重也是 3（属性 + 类 + :hover），但**多一个元素 'body'**，
+   于是它稳压深色那条 —— 结果浅色主题下 hover 出来的是一层中性灰底，
+   白图标压灰底，既不是「白字黄底」，也看不出是黄。
+   深色主题没有这条 body 前缀的规则，所以在深色下是好的 ——
+   这就是「只在某种主题下没改到」的典型表现。
+
+   修法：在浅色这一侧再写一条**同结构、含 body 前缀**的规则。
+   权重变成「属性 + 2 类 + :hover = 4 + 元素 1」，高于基础那条的 3 + 1，
+   顺序上又排在它之后，双重保证胜出。
+   内容与深色那条完全一致（黄底 + 26% 压暗 + 白图标），
+   只是把变量换成本节已 remap 的 --plt-accent 深琥珀 —— 白字压深底约 7.8:1。 */
+body:not([data-ds-dark-theme]) .plt-icon-btn.plt-pass-icon:hover:not(:disabled){background-color:rgba(var(--plt-accent,138,95,6),1);background-image:linear-gradient(rgba(0,0,0,.26),rgba(0,0,0,.26));border-color:rgba(var(--plt-accent,138,95,6),1);color:#fff}
 
 /* —— 正在执行：浅底上把强度压到一半，绿色内阴影才不会糊成一块绿 —— */
-body:not([data-ds-dark-theme]) .plt-item.running{border-color:rgba(31,111,208,.33)}
-body:not([data-ds-dark-theme]) .plt-item.running::after{box-shadow:inset 0 0 20px -10px rgba(31,111,208,.24)}
-body:not([data-ds-dark-theme]) .plt-group-body .plt-item.running{border-color:rgba(31,111,208,.43);box-shadow:inset 0 0 20px -10px rgba(31,111,208,.26)}
-body:not([data-ds-dark-theme]) .plt-group-todo .plt-item.running{border-color:rgba(31,111,208,.36);background:rgba(31,111,208,.05);box-shadow:inset 0 0 0 1px rgba(31,111,208,.12),inset 0 0 22px -10px rgba(31,111,208,.30)}
-body:not([data-ds-dark-theme]) .plt-group-todo .plt-item.running::after{box-shadow:inset 0 0 22px -10px rgba(31,111,208,.28),inset 0 0 0 1px rgba(31,111,208,.1);background:linear-gradient(100deg,transparent 20%,rgba(255,255,255,.5) 45%,rgba(255,255,255,.75) 50%,rgba(255,255,255,.5) 55%,transparent 80%);background-size:220% 100%;background-repeat:no-repeat}
-
 /* —— 详情区：代码块 / 备注 在浅底下改用更淡的着色 —— */
 body:not([data-ds-dark-theme]) .plt-plan{background:var(--dsw-alias-bg-tertiary,#f4f6f9)}
-body:not([data-ds-dark-theme]) .plt-group-body .plt-plan{background:rgba(var(--plt-accent),.06);border-color:rgba(var(--plt-accent),.32)}
-body:not([data-ds-dark-theme]) .plt-group-body .plt-note{background:rgba(var(--plt-accent),.045);border-left-color:rgba(var(--plt-accent),.5)}
+body:not([data-ds-dark-theme]) .plt-group-body .plt-plan{background:rgba(var(--plt-accent,140,140,140),.06);border-color:rgba(var(--plt-accent,140,140,140),.32)}
+body:not([data-ds-dark-theme]) .plt-group-body .plt-note{background:rgba(var(--plt-accent,140,140,140),.045);border-left-color:rgba(var(--plt-accent,140,140,140),.5)}
 body:not([data-ds-dark-theme]) .plt-note{border-left-color:var(--dsw-alias-border-accent,#2f6fd0)}
 body:not([data-ds-dark-theme]) .plt-source{color:#4a5261;background:rgba(96,106,122,.05);border-color:rgba(96,106,122,.34)}
 body:not([data-ds-dark-theme]) .plt-del{color:#c0392b;border-color:rgba(192,57,43,.32)}
@@ -205,13 +292,7 @@ body:not([data-ds-dark-theme]) .plt-del{color:#c0392b;border-color:rgba(192,57,4
  * 已有 body:not([data-ds-dark-theme]) .plt-copy-btn:hover / .done 两条覆盖接管，不需要额外的。 */
 body:not([data-ds-dark-theme]) .plt-err{background:rgba(192,57,43,.08);border-color:rgba(192,57,43,.3);color:#a93226}
 body:not([data-ds-dark-theme]) .plt-input{background:var(--dsw-alias-bg-primary,#fff);color:var(--dsw-alias-label-primary,#141a22);border-color:rgba(20,40,70,.24)}
-/* 草稿编辑框在浅底下：白底 + 绿色描边，聚焦时描边加深并带一圈淡绿光。 */
-body:not([data-ds-dark-theme]) .plt-edit-box .plt-edit-input{background:#fff;border-color:rgba(var(--plt-accent),.4);box-shadow:inset 0 1px 2px rgba(20,40,70,.05);color:#141a22}
-body:not([data-ds-dark-theme]) .plt-edit-box .plt-edit-input:hover{border-color:rgba(var(--plt-accent),.58)}
-body:not([data-ds-dark-theme]) .plt-save-state{color:#59606c}
-body:not([data-ds-dark-theme]) .plt-save-state.pending,body:not([data-ds-dark-theme]) .plt-save-state.saving,body:not([data-ds-dark-theme]) .plt-save-state.saved{color:rgba(var(--plt-accent),1)}
-body:not([data-ds-dark-theme]) .plt-save-state.error{color:#b3261e}
-body:not([data-ds-dark-theme]) .plt-edit-box .plt-edit-input:focus,body:not([data-ds-dark-theme]) .plt-edit-box .plt-edit-input:focus-visible{border-color:rgba(var(--plt-accent),.85);box-shadow:0 0 0 3px rgba(var(--plt-accent),.14),inset 0 1px 2px rgba(20,40,70,.05)}
+/* id=405：草稿编辑框的浅色覆盖（白底 + 绿色描边 + 聚焦淡绿光）已随草稿模式删除。 */
 /* 弹窗盒：与页面底同为纯白，只靠遮罩会显得「浮不起来」，因此描边抬到 1.85:1 并补三层阴影（近距贴边 + 中距扩散 + 远距氛围）。 */
 body:not([data-ds-dark-theme]) .plt-dialog{background:var(--dsw-alias-bg-primary,#fff);border-color:rgba(20,40,70,.30);box-shadow:0 1px 2px rgba(16,32,64,.10),0 10px 24px -6px rgba(16,32,64,.20),0 28px 56px -18px rgba(20,40,80,.24)}
 /* 弹窗遮罩：压暗 38.5%（原 46.9%），既压住底页又不过度发灰，白弹窗靠 1.58 的底差 + 描边 + 三层阴影分离。 */
@@ -231,49 +312,113 @@ body:not([data-ds-dark-theme]) .plt-meta{color:#59606c}
 body:not([data-ds-dark-theme]) .plt-group-count{color:#59606c}
 /* id=275：拆解批次的层级线在白底上要压深一档，否则 2px 的 accent 半透明线和
    「小横钩」几乎看不见；父行的强调竖杠同理，浅色下用不透明的 accent。 */
-body:not([data-ds-dark-theme]) .plt-kids-list{border-left-color:rgba(var(--plt-accent),.34)}
-body:not([data-ds-dark-theme]) .plt-kid::before{background:rgba(var(--plt-accent),.40)}
-body:not([data-ds-dark-theme]) .plt-kid:hover::before{background:rgba(var(--plt-accent),.72)}
-body:not([data-ds-dark-theme]) .plt-item.plt-parent > .plt-head::before{background:rgba(var(--plt-accent),.72)}
-body:not([data-ds-dark-theme]) .plt-item.plt-parent.open > .plt-head::before{background:rgba(var(--plt-accent),1)}
+body:not([data-ds-dark-theme]) .plt-kids-list{border-left-color:rgba(var(--plt-accent,140,140,140),.34)}
+body:not([data-ds-dark-theme]) .plt-kid::before{background:rgba(var(--plt-accent,140,140,140),.40)}
+body:not([data-ds-dark-theme]) .plt-kid:hover::before{background:rgba(var(--plt-accent,140,140,140),.72)}
+body:not([data-ds-dark-theme]) .plt-item.plt-parent > .plt-head::before{background:rgba(var(--plt-accent,140,140,140),.72)}
+body:not([data-ds-dark-theme]) .plt-item.plt-parent.open > .plt-head::before{background:rgba(var(--plt-accent,140,140,140),1)}
 body:not([data-ds-dark-theme]) .plt-kid{background:rgba(15,30,60,.028);border-color:rgba(20,40,70,.14)}
-body:not([data-ds-dark-theme]) .plt-kid:hover{background:rgba(15,30,60,.048);border-color:rgba(var(--plt-accent),.42)}
+body:not([data-ds-dark-theme]) .plt-kid:hover{background:rgba(15,30,60,.048);border-color:rgba(var(--plt-accent,140,140,140),.42)}
 /* id=361：子任务编号胶囊在浅底上要压深一档 —— 深色那条吃的是 accent 的 alpha
    叠加，白底上会淡成一条看不清的小方块。文字用 bluish-700（与 .plt-id 同色阶），
    底色/描边把 accent 的 alpha 提上去但不换色相，两套主题仍是同一族视觉。 */
-body:not([data-ds-dark-theme]) .plt-kid-code{color:#17559c;background:rgba(var(--plt-accent),.12);border-color:rgba(var(--plt-accent),.30)}
-body:not([data-ds-dark-theme]) .plt-kid-done .plt-kid-code{color:#5f6672;background:rgba(var(--plt-accent),.07);border-color:rgba(20,40,70,.16)}
+body:not([data-ds-dark-theme]) .plt-kid-code{color:#17559c;background:rgba(var(--plt-accent,140,140,140),.12);border-color:rgba(var(--plt-accent,140,140,140),.30)}
+body:not([data-ds-dark-theme]) .plt-kid-done .plt-kid-code{color:#5f6672;background:rgba(var(--plt-accent,140,140,140),.07);border-color:rgba(20,40,70,.16)}
 body:not([data-ds-dark-theme]) .plt-kid-note{color:#59606c}
 /* id=317：「已做的子任务」（id=316）在浅色下要逐项对齐 —— 深色那套吃的是
    rgba(255,255,255,.xx) 与 dsw 变量，白底上要么看不见、要么把字刷淡到读不清。
    这里只用两种既有色阶：bluish-700（文字）与 accent 的 alpha（装饰），不引入新色值。 */
 body:not([data-ds-dark-theme]) .plt-kid.plt-kid-done{background:rgba(15,30,60,.045);border-color:rgba(20,40,70,.10)}
-body:not([data-ds-dark-theme]) .plt-kid.plt-kid-done:hover{background:rgba(15,30,60,.075);border-color:rgba(var(--plt-accent),.34)}
+body:not([data-ds-dark-theme]) .plt-kid.plt-kid-done:hover{background:rgba(15,30,60,.075);border-color:rgba(var(--plt-accent,140,140,140),.34)}
 body:not([data-ds-dark-theme]) .plt-kid-done .plt-kid-name{color:#3c4653}
 body:not([data-ds-dark-theme]) .plt-kid-done .plt-kid-plan{color:#4a5563;opacity:1}
 body:not([data-ds-dark-theme]) .plt-kid-done .plt-kid-note{color:#59606c;opacity:1}
-body:not([data-ds-dark-theme]) .plt-kid-done::before{background:rgba(var(--plt-accent),.24)}
-body:not([data-ds-dark-theme]) .plt-kid-check{color:#17559c;background:rgba(var(--plt-accent),.14)}
-body:not([data-ds-dark-theme]) .plt-body.plt-body-parent{border-top-color:rgba(var(--plt-accent),.26)}
-/* id=240：收起态「正在执行」提示。深色那条吃的是 rgba(var(--plt-accent),.95)，
+body:not([data-ds-dark-theme]) .plt-kid-done::before{background:rgba(var(--plt-accent,140,140,140),.24)}
+body:not([data-ds-dark-theme]) .plt-kid-check{color:#17559c;background:rgba(var(--plt-accent,140,140,140),.14)}
+body:not([data-ds-dark-theme]) .plt-body.plt-body-parent{border-top-color:rgba(var(--plt-accent,140,140,140),.26)}
+/* id=240：收起态「正在执行」提示。深色那条吃的是 rgba(var(--plt-accent,140,140,140),.95)，
    浅色下四组 accent 已压深（id=226/228），alpha 再拉满一档到这里：不放白底上会发灰。 */
-body:not([data-ds-dark-theme]) .plt-group-run{color:rgba(var(--plt-accent),1)}
-/* id=377：「完成后暂停」开关的浅色态。
-   关闭态平时是灰字（走 label-caption），浅色下那颗 #9a9a9a 在白底上偏淡，
-   往深里压一档到 #59606c —— 与同组其它 caption 文字（.plt-group-count 等）同一个值，
-   这里不另设一个数。开启态的字/描边本来就吃 --plt-accent（浅色档已压深），
-   不用再覆盖；只把 hover 也钉一次，避免默认那条 .42 的描边在白底上糊掉。 */
-body:not([data-ds-dark-theme]) .plt-auto-pause{color:#59606c;border-color:rgba(20,40,70,.22)}
-body:not([data-ds-dark-theme]) .plt-auto-pause .plt-dot{background:#8b929c}
-body:not([data-ds-dark-theme]) .plt-auto-pause:hover{border-color:rgba(var(--plt-accent),.55);color:rgba(var(--plt-accent),1)}
-body:not([data-ds-dark-theme]) .plt-auto-pause.on{color:rgba(var(--plt-accent),1);border-color:rgba(var(--plt-accent),.55)}
+body:not([data-ds-dark-theme]) .plt-group-run{color:rgba(var(--plt-accent,140,140,140),1)}
+/* ── 「完成后暂停」开关 · 浅色（id=76-B 重写）──────────────────────────────
+ *
+ * 本步要求「一律引用主题变量，不用硬编码颜色」，所以原来那几处
+ * `#59606c` / `#8b929c` / `rgba(20,40,70,.22)` 全部换掉：
+ *   · 文字 → --dsw-alias-label-caption（宿主主题在浅色下自己会给深灰）
+ *   · 边框 → --dsw-alias-border-secondary
+ *   · 圆点 → --dsw-alias-label-tertiary（比 caption 再淡一档，天然是"关"的观感）
+ *
+ * 只保留真正**必须覆盖**的部分：白底上 .45~.5 的 accent 透明度会偏淡，
+ * hover / active / on 的描边要抬到 .55~.7 才看得清 —— 这不是"另一套配色"，
+ * 而是同一支 --plt-accent 在浅底上需要的不同透明度，属于主题内调整。
+ * 底色（background）也用 accent 的低透明度，与文字同源，不会撞色。
+ */
+body:not([data-ds-dark-theme]) .plt-auto-pause{
+  /* 回退值取 #6b7280 而不是沿用深色那条的 #9a9a9a ——
+     实测 #9a9a9a 在纯白底上只有 2.81:1，远低于 4.5；#6b7280 是 4.83:1。
+     宿主有 --dsw-alias-label-caption 时用不到回退，但没有该变量的环境
+     （或被宿主换成浅色值）就会踩到，所以回退值本身也要能读。 */
+  color:var(--dsw-alias-label-caption,#6b7280);
+  border-color:var(--dsw-alias-border-secondary,rgba(20,40,70,.22));
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause .plt-dot{
+  background:var(--dsw-alias-label-tertiary,#8b929c);
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause:hover{
+  border-color:rgba(var(--plt-accent,140,140,140),.6);
+  background:rgba(var(--plt-accent,140,140,140),.08);
+  color:rgba(var(--plt-accent,140,140,140),1);
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause:active{
+  border-color:rgba(var(--plt-accent,140,140,140),.72);
+  background:rgba(var(--plt-accent,140,140,140),.15);
+  color:rgba(var(--plt-accent,140,140,140),1);
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause:focus-visible{
+  outline-color:rgba(var(--plt-accent,140,140,140),.8);
+}
+/* id=wZIKdd：浅色档开态也改为黄色（--plt-run 在浅色下是深黄 #a16207，白底 4.92:1）。 */
+body:not([data-ds-dark-theme]) .plt-auto-pause.on{
+  color:rgba(var(--plt-run,255,214,10),1);
+  border-color:rgba(var(--plt-run,255,214,10),.55);
+  background:rgba(var(--plt-run,255,214,10),.1);
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause.on .plt-dot{
+  /* 浅色档 --plt-run 已压深（#a16207），白底上够清楚。 */
+  background:rgb(var(--plt-run,255,214,10));
+  box-shadow:0 0 0 2px rgba(var(--plt-run,255,214,10),.2);
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause.on:hover{
+  border-color:rgba(var(--plt-run,255,214,10),.7);
+  background:rgba(var(--plt-run,255,214,10),.17);
+}
+/* 禁用态 · 浅色（id=76-C）。
+   深色那几条已经把所有态（含 .on）重置成"灰、空心、无底色"，
+   这里要把**灰色本身**换成浅色档（白底上用深色那条的浅灰会看不见），
+   同时补上 opacity / cursor —— 深色里那条 `.plt-auto-pause:disabled` 只管
+   深色档，浅色若只写组合选择器就会漏掉"单纯 disabled"这一条。 */
+body:not([data-ds-dark-theme]) .plt-auto-pause:disabled{
+  opacity:.45;
+  cursor:default;
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause:disabled,
+body:not([data-ds-dark-theme]) .plt-auto-pause:disabled:hover,
+body:not([data-ds-dark-theme]) .plt-auto-pause:disabled:active,
+body:not([data-ds-dark-theme]) .plt-auto-pause.on:disabled,
+body:not([data-ds-dark-theme]) .plt-auto-pause.on:disabled:hover{
+  background:transparent;
+  border-color:var(--dsw-alias-border-secondary,rgba(20,40,70,.22));
+  color:var(--dsw-alias-label-caption,#6b7280);
+  outline:none;
+}
+body:not([data-ds-dark-theme]) .plt-auto-pause:disabled .plt-dot,
+body:not([data-ds-dark-theme]) .plt-auto-pause.on:disabled .plt-dot{
+  background:var(--dsw-alias-label-tertiary,#8b929c);
+  box-shadow:none;
+}
 /* 上限下拉（id=190）：浅色下白底，深色那条 #1c1f24 的 option 底色要翻回来；
    箭头的 data-uri 是写死的中灰，浅色下偏淡，换一版深灰的图。
    底色仍走组自身的 --plt-accent（浅色档已审核是 96,106,122），只把透明度提一档，
    免得在白底上几乎看不见这个控件。 */
-body:not([data-ds-dark-theme]) .plt-limit{border-color:rgba(96,106,122,.39);background-color:rgba(96,106,122,.1);background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%2359606c' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");color:#3c434e}
-body:not([data-ds-dark-theme]) .plt-limit:hover:not(:disabled){border-color:rgba(96,106,122,.5);background-color:rgba(96,106,122,.16)}
-body:not([data-ds-dark-theme]) .plt-limit option{background:#ffffff;color:#2b3240}
 body:not([data-ds-dark-theme]) .plt-foot{color:#6a7280;opacity:1}
 body:not([data-ds-dark-theme]) .plt-empty{color:#59606c}
 /* 空组提示：深色下靠 opacity:.8 压暗，浅色下会直接糊掉，改成实色 + 图标稍亮。 */
@@ -309,14 +454,17 @@ body:not([data-ds-dark-theme]) .plt-bulk-go.is-working:disabled{color:#17539e;ba
       换成白字后 4.70 / 5.44，两个强调色都过线。
    ②「批量删除」的红色是给深底调的 rgba(.92/.82) 半透明，浅底上合成出来只有 3.73:1，
       浅色改成实心红（#c0392b → #a83232，白字 5.98）。 */
-body:not([data-ds-dark-theme]) .plt-bulk-pass,
-body:not([data-ds-dark-theme]) .plt-bulk-promote{color:#fff}
+/* id=71-E：这里原先是两条选择器并列 —— 批量「通过」与批量「转待执行」两颗按钮。
+   71 组之前清理草稿模式时删掉了后者的选择器，却没删前面的逗号，
+   于是前一条悬空（逗号后紧跟注释和另一条规则）——
+   结果下面那条 color:#fff 失去了选择器（被并进后续规则），浅色下按钮字色悄悄回退。
+   现在把这批白字规则合并成一条完整规则。
+   （按本项目规矩：注释里提到类名不写前导点，否则 dead-css 会当成一处“定义”。） */
+body:not([data-ds-dark-theme]) .plt-bulk-pass{color:#fff}
 /* 底色也要给：基础样式是 .98/.82 的半透明渐变，叠在浅色批量条上算出来只有 3.16:1，
    浅色下改成 1/.9 的实心渐变（琥珀 5.08、草绿 5.87），保留上下渐变的层次感。 */
-body:not([data-ds-dark-theme]) .plt-bulk-pass{background:linear-gradient(180deg,rgba(var(--plt-accent),1),rgba(var(--plt-accent),.9))}
-body:not([data-ds-dark-theme]) .plt-bulk-promote{background:linear-gradient(180deg,rgba(var(--plt-accent),1),rgba(var(--plt-accent),.9))}
+body:not([data-ds-dark-theme]) .plt-bulk-pass{background:linear-gradient(180deg,rgba(var(--plt-accent,140,140,140),1),rgba(var(--plt-accent,140,140,140),.9))}
 body:not([data-ds-dark-theme]) .plt-bulk-pass:hover:not(:disabled),
-body:not([data-ds-dark-theme]) .plt-bulk-promote:hover:not(:disabled){background:linear-gradient(180deg,rgba(var(--plt-accent),1),rgba(var(--plt-accent),.96))}
 body:not([data-ds-dark-theme]) .plt-bulk-del{
   border-color:rgba(150,44,38,.85);
   background:linear-gradient(180deg,#c0392b,#a83232);
@@ -371,4 +519,46 @@ body:not([data-ds-dark-theme]) .plt-split-card{
 /* 浅色下转圈用深一档的蓝，白底上 #8ab0f5 会糊。 */
 body:not([data-ds-dark-theme]) .plt-split-card svg{color:#3a72c8}
 body:not([data-ds-dark-theme]) .plt-split-card .plt-split-hint{color:#5b6675}
-`)
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【14】浅色 · 三组配色与组头
+ * 源：src/client/20-css/30-light.js 的分组配色段（id=79-C 已迁入 src/styles/）
+ * 深色：已审核 156,163,175 / 待审核 255,180,60 / 待执行 var(--plt-todo,46,160,67)（240,82,82）
+ * 浅色：已审核 96,106,122 / 待审核 138,95,6 / 待执行 var(--plt-todo,46,160,67)（185,28,28）
+ * （浅色值都压深过，为的是让 accent@1 的小字在白底上达到 4.5:1）
+ * id=78-B/C：待执行与执行中已改红色主题，组色统一走 01-base.css 的【1.5】变量，
+ *            这里不再写死任何绿色。
+ * ────────────────────────────────────────────────────────────────────────── 
+ * （规则已随【13】整段搬入 —— 源是同一个片段 30-light.js，不按视觉切分拆开。）
+ */
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【15】浅色 · 条目与详情
+ * 源：20-css/30-light.js 的条目/详情段
+ * 注：执行中（running）的独立覆盖已按 id=4-A 全部删除，不再有专属外观。色。
+ * ────────────────────────────────────────────────────────────────────────── 
+ * （规则已随【13】整段搬入 —— 源是同一个片段 30-light.js，不按视觉切分拆开。）
+ */
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【16】浅色 · 批量区与胶囊
+ * 源：20-css/30-light.js 的后段
+ * ⚠ 已知易错点：并列选择器里删掉一个名字时要连逗号一起删，
+ *   否则前一条规则的声明会失去选择器（id=71-E 踩过一次：
+ *   批量「通过」按钮的 color:#fff 就是这样丢的）。
+ * ────────────────────────────────────────────────────────────────────────── 
+ * （规则已随【13】整段搬入 —— 源是同一个片段 30-light.js，不按视觉切分拆开。）
+ */
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 【17】浅色 · 动效降级
+ * 源：20-css/30-light.js 里的 animation 覆盖（1 条）
+ * 与 prefers-reduced-motion 的降级不是一回事：这里是浅色下的视觉微调。
+ * ⚠ 本段是全项目唯一在浅色侧写 animation 的地方（79-D 需确认它排在
+ *   对应 @keyframes 之后、且不与 02 段里的同名声明冲突）。
+ * ────────────────────────────────────────────────────────────────────────── 
+ * （规则已随【13】整段搬入 —— 源是同一个片段 30-light.js，不按视觉切分拆开。）
+ */

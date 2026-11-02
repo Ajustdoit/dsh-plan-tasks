@@ -58,7 +58,7 @@ window.__ModuleLoader__.load({
      * 窄侧栏里可能只剩三四个字，宽侧栏里又能显示一整行 —— 同一批条目看起来长短不一。
      * 按字数截之后，无论侧栏多宽，标题的「信息量」是一致的。
      *
-     * 只作用于待执行（groupKey === 'todo'）：待审核 / 已审核 / 草稿要能一眼看清全称
+     * 只作用于待执行（groupKey === 'todo'）：待审核 / 已审核要能一眼看清全称
      * （那些是已经做完或即将执行的东西，用户在核对内容，不是快速扫队列）。
      */
     const TODO_NAME_MAX = 14
@@ -129,5 +129,5 @@ window.__ModuleLoader__.load({
     const MODEL_READY_ATTEMPTS = 3
     const MODEL_READY_GAP_MS = 500
 
-    /** 图标底色：稳定的品牌蓝。取 static 层 token，主题包不会改写它。 */
-    const ICON_BLUE = 'var(--dsw-static-deepseek-500, #4176e6)'
+    // id=71-D：ICON_BLUE 常量已删除 —— 图标颜色改由 CSS 类 .plt-ico-brand 承担，
+    // 走同一个 static 层 token，不再需要 JS 侧的字符串中转。
