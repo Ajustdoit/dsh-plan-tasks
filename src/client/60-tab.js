@@ -369,6 +369,7 @@
         }
       }, [sessionId])
 
+
       // —— 可用模型列表：初始化阶段就拉一次（id=363）——
       //
       // 原来这对数据只在「真发一次拆解请求」时才被问起，而宿主那边的
@@ -457,6 +458,48 @@
       }, [modelLoading, sessionId, cwd])
 
       const items = state.data?.items ?? []
+
+      // —— turn 结束上报（id=ImWOun 后续优化）——
+      //
+      // 为什么要做：宿主的「孤儿回收」原本靠「有没有产出（time / note）」推断
+      // 「这一轮有没有跑起来」。于是「模型跑完了、只是没调 q.mjs done」会被误判成
+      // 中断 —— 而这是**两个完全不同的信号**被混成了一个。
+      //
+      // 真正的信号「turn 是否结束」只有客户端有：`sessions.list` 的 running
+      // 由 true 翻成 false 就是那一刻。这里在翻转时把它上报给宿主，
+      // 宿主写 `turnEndedAt`，孤儿判据优先看这个字段。
+      //
+      // 为什么用 ref 记上一次而不是直接在 effect 里比：
+      // `agentRunning` 是 state，effect 每次变化都会重跑，但我们只关心
+      // **true → false** 这一个方向（false → true 是「开始了」，不是结束）。
+      const prevRunningRef = React.useRef(false)
+      React.useEffect(() => {
+        const wasRunning = prevRunningRef.current
+        prevRunningRef.current = agentRunning === true
+        // 只处理「刚刚结束」这一跳；其余情况（包括首次挂载）一律不动作。
+        if (!(wasRunning && agentRunning !== true)) return
+        if (typeof sessionId !== 'string' || sessionId === '') return
+        // 把所有「已经开始但没完成」的条目都报一遍 —— 正常情况下只有一条，
+        // 但并发 / 上一次残留时可能是多条，逐条报比猜一条更稳。
+        // 宿主端对同一条是幂等的（已有 turnEndedAt 就不重写）。
+        const startedButOpen = (items ?? [])
+          .filter(
+            (it) =>
+              it !== null
+              && typeof it === 'object'
+              && it.execute !== true
+              && it.failed !== true
+              && typeof it.startedAt === 'string'
+              && it.startedAt !== ''
+              && (typeof it.turnEndedAt !== 'string' || it.turnEndedAt === ''),
+          )
+          .map((it) => it.id)
+        for (const id of startedButOpen) {
+          // 失败不打扰用户：这只是给宿主补一个判据字段，不是主操作。
+          // 报不上去最坏是退回「按产出 + 宽限」的老判据，不会更糟。
+          call('markTurnEnd', { ...payload, id }).catch(() => null)
+        }
+      }, [agentRunning, items, sessionId])
 
       // 状态兜底：模型已经开始干活，但还没把 startedAt 写进 plan.json 的那几秒，
       // 把「待执行」里排在最前面的那条先按「执行中」展示，避免「AI 在跑，列表全写待执行」。
@@ -2084,6 +2127,20 @@
                         { key: 'todo', title: '待执行', list: todoList, drag: true, alwaysShow: true, emptyText: '待执行里没有计划，在下面的输入框写一条。' },
                         // id=405：草稿组已移除（题面：界面不再出现任何草稿相关元素）。
                       ]
+                      // id=fzTvER-B：每个组的「序号」——在**已排好序的列表**上算一次，
+                      // 渲染时按 id 查。序号是展示用的位置（1 起），与 id 无关。
+                      //
+                      // 为什么按组算而不是全局算：三个页签各自的列表长度不同，
+                      // 用户看到的「第 2 条」是该页签里的第 2 条。全局编号会在
+                      // 每个页签里出现跳号（1、3、7），反而更难读。
+                      //
+                      // 为什么先算成 Map 再传下去：`sequenceOf` 按数组下标递增，
+                      // 而渲染时拿到的是单个 item —— 用 Map 查是 O(1)，
+                      // 也避免在渲染循环里重复算整份列表。
+                      const seqByGroup = new Map()
+                      for (const group of groups) {
+                        seqByGroup.set(group.key, sequenceMapOf(group.list))
+                      }
                       const renderItem = (item, dragEnabled, groupKey) => {
                         // 「待审核」「已审核」两组支持勾选：分别用于批量审核、批量删除。
                         // id=405：草稿组移除后，「批量转待执行」这个用途也不存在了。
@@ -2093,9 +2150,20 @@
                           statusOf(item, false, delivered).key !== 'running'
                         const pickedSet = groupKey === 'reviewed' ? pickedDone : picked
                         const setPickedSet = groupKey === 'reviewed' ? setPickedDone : setPicked
+                        // id=fzTvER-B：这一条在所属页签里的位置（1 起）。
+                        // 查不到时退回 0 —— 由 Item 决定不渲染序号，
+                        // 而不是在这里硬编一个可能错的数字。
+                        //
+                        // 注意用**原始 id 值**查：`sequenceMapOf` 用的就是 `item.id` 本身，
+                        // 数字 id（历史数据）与字符串 id（随机 6 位）各自作为 Map 键，
+                        // 这里若先 `String()` 一遍反而查不到历史数字 id。
+                        const seqMap = seqByGroup.get(groupKey)
+                        const seq = seqMap instanceof Map ? (seqMap.get(item.id) ?? 0) : 0
                         return h(Item, {
                           key: item.id,
                           item,
+                          // id=fzTvER-B：展示用序号（1 起，所属页签内）。0 表示查不到。
+                          seq,
                           // 这一条刚换了分组：让它在新的栏里播一次「升华 / 蒸腾」动画。
                           sublime: sublimeIds.has(item.id),
                           open: openId === item.id,

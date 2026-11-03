@@ -16,7 +16,11 @@
       // 后来的人会以为子任务行还能改点什么。
       // `groupKey` 保留：耗时节点的显示条件还要用它（待审核/已审核才画）。
       // id=89-D：`delivered` 由上层透传 —— 子任务的「执行中」也要按派发记录判定。
-      const { kids, groupKey, delivered } = props
+      // id=fzTvER-C：`parentSeq` / `parentId` 也一并透传 —— 子任务行要显示成
+      // `1 # QSX45D -A`（序号与父相同 + 父 id + 空格 + 后缀），不再各自从 1 编号。
+      const { kids, groupKey, delivered, parentSeq, parentId } = props
+      // 父 id 的文本形态，用于和后缀拼接。
+      const parentIdText = String(parentId ?? '').trim()
       return h(
         'div',
         { className: 'plt-kids-list' },
@@ -45,6 +49,22 @@
           // 这里绝不能直接模板化 null/undefined，否则会渲染出 `#undefined`。
           const rawCode = String(child.code ?? '').trim()
           const codeText = rawCode !== '' ? rawCode : String(child.id ?? '').trim()
+          // id=fzTvER-C：把完整子 id 拆成「父 id + 后缀」，供新格式使用。
+          //
+          // 子 id 形如 `QSX45D-A`（父 6 位随机 + `-` + 后缀）。
+          // 后缀可能是 A / Z / AA（见 ids.js 的 childSuffix：0→A、25→Z、26→AA），
+          // 所以只切**第一个** `-` 之后的全部，不能只取一个字母。
+          //
+          // 拆不出来（没有 `-`，或前半段与 parentId 不一致）就退回原样显示，
+          // 不做任何猜测 —— 猜错会把别的节点的后缀挂到这一行上。
+          const suffix = (() => {
+            const at = codeText.indexOf('-')
+            if (at <= 0 || at === codeText.length - 1) return ''
+            const head = codeText.slice(0, at)
+            // 前半段必须就是父 id，否则说明这条不是这一批的孩子（历史数据 / 数据异常）。
+            if (parentIdText !== '' && head !== parentIdText) return ''
+            return codeText.slice(at + 1)
+          })()
           // id=322 曾把 children 行的编号整个删掉，理由是「子任务不参与拖拽 / 批量，
           // 编号只在父行有意义」。id=361 把这个理由收回来一半：**身份还是要显示的**，
           // 只是形状不同（窄胶囊，不是顶层那枚裸 `#id`），而且位置从「标题之前的最左端」
@@ -78,6 +98,16 @@
               // 再加 `#` 成了两种记号混排」。该理由在 id 改为随机 6 位后不再成立：
               // 子任务编号现在是 `PddZRy-A` 这种，它和顶层的 `#PddZRy` 是同一种身份形状，
               // 用户的诉求是「列表里所有编号统一成 #xxx」。混排问题反而因为统一前缀而消失。
+              // id=fzTvER-C：新格式 `1 # QSX45D -A` ——
+              //   序号与**父条目相同**（子任务不各自从 1 编号），
+              //   后面是父 id + 空格 + 子任务的后缀。
+              //
+              // 为什么序号跟父一样：子任务是这一批的组成部分，不是独立排位。
+              // 若各自从 1 编号，展开一组后会出现「1 号父下面挂着 1、2、3 号子任务」，
+              // 两套编号在同一屏里打架，用户没法用「3 号」指代任何东西。
+              //
+              // 后缀拆不出来时（suffix === ''）退回原来的 `#codeText`，
+              // 保证身份永远可见 —— 格式可以退化，身份不能丢。
               codeText !== ''
                 ? h(
                     'span',
@@ -86,7 +116,18 @@
                       // 复制不了也点不了，只是视觉定位；读屏念一遍编号同样是有效信息。
                       'data-tip': `编号 #${codeText}`,
                     },
-                    `#${codeText}`,
+                    Number.isFinite(parentSeq) && parentSeq > 0
+                      ? h(
+                          'span',
+                          { className: 'plt-kid-id' },
+                          h('span', { className: 'plt-seq' }, String(parentSeq)),
+                          ' ',
+                          h('span', { className: 'plt-id-hash' }, '#'),
+                          ' ',
+                          parentIdText !== '' ? parentIdText : codeText,
+                          suffix !== '' ? h('span', { className: 'plt-kid-suffix' }, ` -${suffix}`) : null,
+                        )
+                      : `#${codeText}`,
                   )
                 : null,
               h(
@@ -148,7 +189,7 @@
     function Item(props) {
       // id=405：草稿模式移除后，onPromote / onDemote / canDemote / editable 四个 prop
       // 一并从解构里删掉 —— 它们只服务草稿组（转进 / 转出 / 就地编辑），组没了就没对象。
-      const { item, open, detail, onToggle, onPatch, onRemove, onFetchDetail, busy, dragging, dropTarget, dropped, onDragStart, onDragOver, onDrop, onDragEnd, dragEnabled, selectable, selected, onSelect, showExecute, showReview, groupKey, impliedRunning, canPin, onPinTop, onApproveBatch, delivered } = props
+      const { item, seq, open, detail, onToggle, onPatch, onRemove, onFetchDetail, busy, dragging, dropTarget, dropped, onDragStart, onDragOver, onDrop, onDragEnd, dragEnabled, selectable, selected, onSelect, showExecute, showReview, groupKey, impliedRunning, canPin, onPinTop, onApproveBatch, delivered } = props
       // id=273：父节点（带 children 的拆解批次）只当容器 —— 它没有正文、不参与执行，
       // 标题行就只显示原始提示词标题（name 本身就是从 sourcePrompt 压出来的），
       // 展开后交给下面的子任务列表，父自己的「计划 / 备注」一块都不渲染。
@@ -335,7 +376,34 @@
             : null,
           h('span', { className: 'plt-caret' }, h(CaretIcon, { size: 13 })),
           // 编号单独占一个窄标签，标题就能把剩下的宽度全用上。
-          h('span', { className: 'plt-id' }, `#${item.id}`),
+          //
+          // id=fzTvER-B：显示成 `1 # QSX45D` ——
+          //   · 前面是**该页签内的位置**（1 起），由上层传下来的 `seq`；
+          //   · 后面是**原始 id**，一字不改。
+          //
+          // 为什么两者都要：序号回答「排到第几个」，id 回答「是哪一条」。
+          // id 仍是点击、复制、派发的唯一依据 —— 这里只是多显示一个序号，
+          // 展示层不动任何数据的 id（`item.id` 原样用于 key / 事件 / 复制）。
+          //
+          // `seq` 取不到（0 / 非数字）时只显示 `# id`：
+          // 硬编一个「1」会让所有查不到的条目都显示成第 1 条，比不显示更误导。
+          //
+          // 拆成两个 span 而不是拼成一个字符串：序号要弱化（浅色、小一号），
+          // 混在一个文本节点里就没法单独上色了。
+          Number.isFinite(seq) && seq > 0
+            ? h(
+                'span',
+                { className: 'plt-id' },
+                // 格式固定为 `1 # QSX45D`（题面要求：序号 + 空格 + # + 空格 + 原 id）。
+                // 三个 span 之间必须显式写出空格字符串 —— 相邻的行内元素在 HTML 里
+                // 不会自动插入空白，不加就会渲染成 `1#QSX45D`。
+                h('span', { className: 'plt-seq' }, String(seq)),
+                ' ',
+                h('span', { className: 'plt-id-hash' }, '#'),
+                ' ',
+                String(item.id),
+              )
+            : h('span', { className: 'plt-id' }, `# ${item.id}`),
           h(
             'span',
             {
@@ -705,6 +773,14 @@
                 groupKey,
                 // id=89-D：子任务的「执行中」也按派发记录判定，与父同一份数据。
                 delivered,
+                // id=fzTvER-C：父的序号与父 id —— 子任务行要显示成
+                // `1 # QSX45D -A`：**序号与父条目相同**，不各自从 1 开始。
+                //
+                // 这两个值父组件本来就有（`seq` 是渲染时传进来的，`item.id` 就在手边），
+                // 直接传下去即可，不需要去 children.js 里补字段，也不用客户端二次推算：
+                // 子任务在同一批里共享父的位置，这是「位置」的语义，不是「身份」的语义。
+                parentSeq: seq,
+                parentId: item.id,
               }),
               // 原始提示词仍留在最下面：这一批当初是根据哪句话拆出来的。
               // 默认展开的组：待执行（id=375，批次）与待审核（id=387，全部）——

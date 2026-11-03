@@ -52,7 +52,7 @@
   },
   "scripts": {
     "build": "node build.mjs",
-    "test": "node scripts/check-imports.mjs && node scripts/unused-imports.mjs && node scripts/unused-decls.mjs && node scripts/unused-decls.mjs --host && node scripts/check-taskid-parity.mjs && node scripts/check-missing-imports.mjs && node scripts/dead-css.mjs && node build.mjs --check && node --check lib/client.js",
+    "test": "node scripts/check-imports.mjs && node scripts/unused-imports.mjs && node scripts/unused-decls.mjs && node scripts/unused-decls.mjs --host && node scripts/check-taskid-parity.mjs && node scripts/check-seq-parity.mjs && node scripts/check-missing-imports.mjs && node scripts/dead-css.mjs && node build.mjs --check && node --check lib/client.js",
     "prepack": "node build.mjs"
   },
   "publishConfig": {

@@ -667,7 +667,7 @@ body:not([data-ds-dark-theme]) .plt-root{
 
 /* ────────────────────────────────────────────────────────────
  * 条目与内容（条目、分组、详情、子任务、批量区、胶囊）
- * 源文件：src/styles/02-content.css（279 条规则）
+ * 源文件：src/styles/02-content.css（283 条规则）
  * ──────────────────────────────────────────────────────────── */
 /* ============================================================================
  * DSH「任务列表」插件样式 · 第 2/3 段：条目与内容
@@ -1327,6 +1327,14 @@ body:not([data-ds-dark-theme]) .plt-root{
 /* 标题永远单行：长标题用省略号收尾，绝不换行 —— 一旦换行，条目会被撑成两三层高，
    右侧的状态胶囊还会被挤到下一行去。右边留 5px，让省略号和状态胶囊之间透一口气。 */
 .plt-id{flex:0 0 auto;font-size:12.5px;line-height:1.32;color:var(--dsw-alias-label-caption,#8a8a8a);font-variant-numeric:tabular-nums;opacity:.85}
+/* id=fzTvER-B：条目主行编号现在显示成 `1 # QSX45D`（序号 + 空格 + # + 空格 + 原 id）。
+   序号是「排在第几个」，属于位置信息，要弱化；id 是身份，保持原样。
+   两者都在 .plt-id 里，靠 .plt-seq 把前半段再压淡一档 —— 视线先落在 id 上。
+   注意：这里**不加 margin** —— 题面要求的空格由 JSX 里显式的 ' ' 提供，
+   再用 margin 补间距会让 `1 # QSX45D` 的间隔变成两倍。 */
+.plt-root .plt-seq{opacity:.62;font-weight:400}
+/* `#` 分隔符同样压淡：它是标点不是内容，权重不该和 id 一样。 */
+.plt-root .plt-id-hash{opacity:.72}
 /* id=179：待审核标题右侧的耗时。字号比标题小一档（14.5→11.5）、字重降到 400、
    颜色用 caption 灰，和 .plt-name 的 600 字重主色拉开；.plt-name 是 flex:1 1 auto，
    所以这个节点固定落在标签左侧成一列，多行的耗时会竖向对齐，比贴着标题文字
@@ -1357,8 +1365,31 @@ body:not([data-ds-dark-theme]) .plt-root{
 /* 执行中：转圈图标匀速旋转，作为「还在跑」的活信号（减少动态偏好下停转）。 */
 /* 执行中徽标只放一个转圈（id=352-D）：外框固定 26×20，与文字徽标的行高对齐，
    所以这一条从文字变图标时整列右边界不会移动。颜色继承 .plt-tag 的 color，
-   深浅主题各自由 30-light.js 的既有规则决定，这里不再写第二套颜色。 */
-.plt-tag.plt-run-only{width:26px;height:20px;padding:0;justify-content:center;box-sizing:border-box}
+   深浅主题各自由 30-light.js 的既有规则决定，这里不再写第二套颜色。
+
+   id=UpcIC7：转圈不居中 + 外边框 —— 两个问题的根因都在这一条上。
+   ① **不居中**：原来只有 `justify-content:center`，但 `.plt-tag` 基类
+      **没有 `display:flex`**（它是行内 span，靠 line-height 撑高，文字徽标够用）。
+      `justify-content` 对非 flex 容器**完全无效**，所以图标实际是「行内元素靠基线排」——
+      垂直方向上被 line-height:20px 的基线余量顶偏，看起来就是没居中。
+      补 `display:inline-flex` 才让 justify/align 真正生效。
+   ② **外边框**：边框来自 `.plt-tag` 基类的 `border:1px solid transparent`。
+      文字徽标需要它（透明边框占位，悬停时才显出轮廓，避免悬停时整块跳动），
+      但这一颗只有一个转圈、没有文字，透明边框只会让 13px 的图标在 24×18 的
+      内容区里再少 2px，视觉上更偏。题面要求「可以不要外边框」——这里直接去掉。
+      去掉后内容区变成整整 26×20，13px 图标四周余量均匀。 */
+.plt-tag.plt-run-only{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:26px;
+  height:20px;
+  padding:0;
+  border:0;                      /* id=UpcIC7：去掉外边框 */
+  box-sizing:border-box;
+  line-height:1;                 /* id=UpcIC7：行高不再影响垂直居中 */
+  vertical-align:middle;         /* id=UpcIC7：行内排版时与相邻文字对齐 */
+}
 /* 空文字节点会撑出 1px 的基线空隙，转圈本身不占文字宽度，压掉。 */
 .plt-tag.plt-run-only > span{display:none}
 .plt-spin{animation:plt-spin .9s linear infinite;transform-origin:50% 50%}
@@ -1624,6 +1655,13 @@ body:not([data-ds-dark-theme]) .plt-root{
    标题 flex-shrink:1 + min-width:0 → 由它独自吃掉全部压缩，最后以省略号收尾。
    所以窄侧栏里看到的是「2-A 完整 + 标题变短」，不会是「标签被压成 2…」。 */
 .plt-kid-code{flex:0 0 auto;font-size:11px;line-height:16px;padding:0 5px;border-radius:5px;font-variant-numeric:tabular-nums;letter-spacing:.01em;color:rgba(var(--plt-accent,140,140,140),.95);background:rgba(var(--plt-accent,140,140,140),.13);border:1px solid rgba(var(--plt-accent,140,140,140),.26);white-space:nowrap}
+/* id=fzTvER-C：子任务编号现在是 `1 # QSX45D -A` —— 序号与父相同，
+   后面拼父 id 与后缀。后缀（`-A` / `-AA`）是这批内唯一的区分位，
+   所以它要比父 id 稍亮一档：扫一列时先认出「第几条子任务」。
+   注意：空格由 JSX 里显式的 ' ' 提供，这里只调颜色，不补 margin。 */
+.plt-root .plt-kid-suffix{opacity:1;font-weight:600}
+/* 父 id 段在子任务行里是「共用的那一半」，压淡一档让后缀跳出来。 */
+.plt-root .plt-kid-id{opacity:.92}
 /* 已做的行：编号跟着整卡一起沉下去，但不能消失——回看历史时更需要编号定位。 */
 .plt-kid-done .plt-kid-code{color:var(--dsw-alias-label-caption,#8a8a8a);background:rgba(var(--plt-accent,140,140,140),.07);border-color:rgba(var(--plt-accent,140,140,140),.16)}
 /* id=362：标题是**唯一**可压缩项。min-width:0 必须留着 —— flex 子项默认
@@ -2373,8 +2411,8 @@ body:not([data-ds-dark-theme]) .plt-split-card .plt-split-hint{color:#5b6675}
  * 分段索引（便于对照源码）
  * ============================================================
  *  01. 基础与外壳（变量、面板、顶栏、遮罩、tooltip、输入区）            112 条 ← src/styles/01-base.css
- *  02. 条目与内容（条目、分组、详情、子任务、批量区、胶囊）                279 条 ← src/styles/02-content.css
+ *  02. 条目与内容（条目、分组、详情、子任务、批量区、胶囊）                283 条 ← src/styles/02-content.css
  *  03. 主题覆盖 · 浅色（必须最后）                           141 条 ← src/styles/03-theme.css
  *
- * 合计 532 条规则 / 3 个模块。
+ * 合计 536 条规则 / 3 个模块。
  * ============================================================ */
