@@ -189,7 +189,11 @@
     function Item(props) {
       // id=405：草稿模式移除后，onPromote / onDemote / canDemote / editable 四个 prop
       // 一并从解构里删掉 —— 它们只服务草稿组（转进 / 转出 / 就地编辑），组没了就没对象。
-      const { item, seq, open, detail, onToggle, onPatch, onRemove, onFetchDetail, busy, dragging, dropTarget, dropped, onDragStart, onDragOver, onDrop, onDragEnd, dragEnabled, selectable, selected, onSelect, showExecute, showReview, groupKey, impliedRunning, canPin, onPinTop, onApproveBatch, delivered } = props
+      const { item, seq, open, detail, onToggle, onPatch, onRemove, onFetchDetail, busy, dragging, dropTarget, dropped, onDragStart, onDragOver, onDrop, onDragEnd, dragEnabled, selectable, selected, onSelect, showExecute, showReview, groupKey, impliedRunning, canPin, onPinTop, onApproveBatch, delivered, cwd } = props
+      // id=UpcIC7-IMG：附件图片（条目上只存文件名，URL 现拼）。
+      // 三个页签都渲染它 —— 待执行 / 待审核 / 已审核一视同仁，
+      // 因为「这条任务带着哪些图」是身份信息，不是状态信息。
+      const itemImages = Array.isArray(item.img) ? item.img.filter((n) => typeof n === 'string' && n !== '') : []
       // id=273：父节点（带 children 的拆解批次）只当容器 —— 它没有正文、不参与执行，
       // 标题行就只显示原始提示词标题（name 本身就是从 sourcePrompt 压出来的），
       // 展开后交给下面的子任务列表，父自己的「计划 / 备注」一块都不渲染。
@@ -989,6 +993,35 @@
                 // 随草稿模式一并删除 —— 它只在 editable（草稿组）时渲染。
                 // 现在正文一律只读展示，与其它组一致。
                 h('div', { className: 'plt-plan' }, planText || '（空）'),
+                // id=UpcIC7-IMG：附件图片缩略图（三个页签都显示）。
+                //
+                // 位置在正文之后、备注之前：先读任务说明，再看它带着什么图。
+                // 没有图片时整块不渲染 —— 不留空槽，卡片高度不受影响。
+                //
+                // 单击放大（灯箱），不打开新标签：侧边栏是工作区的一部分，
+                // 跳走会打断手上的事。
+                itemImages.length > 0
+                  ? h(
+                      'div',
+                      { className: 'plt-imgs' },
+                      itemImages.map((name) =>
+                        h('img', {
+                          key: name,
+                          className: 'plt-img-thumb',
+                          src: imageUrl(name, cwd),
+                          alt: '附件图片',
+                          loading: 'lazy',
+                          draggable: false,
+                          'data-tip': '点击放大',
+                          onClick: (e) => {
+                            // 缩略图在卡片里，卡片本身可点展开 —— 别让点击冒泡过去。
+                            e.stopPropagation()
+                            openLightbox(name, cwd)
+                          },
+                        }),
+                      ),
+                    )
+                  : null,
               ),
               noteText
                 ? h('div', { className: 'plt-sec' }, h('div', { className: 'plt-sec-h' }, '备注 / 执行结果'), h('div', { className: 'plt-note' }, noteText))

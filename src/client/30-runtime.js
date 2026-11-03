@@ -85,6 +85,24 @@
     }
 
     /**
+     * 附件图片的 URL（id=UpcIC7-IMG）。
+     *
+     * 图片由宿主按文件名提供（`/plan-tasks/images?name=…`），磁盘上只有文件，
+     * 条目里存的也只是文件名 —— 所以要拼 URL 才能显示。
+     *
+     * `cwd` 必须带上：图片路由没有会话 id 可用（`<img>` 请求带不了那些头），
+     * 宿主只能靠这个参数定位 `.plan/images/`。它只是提示值，
+     * 宿主仍会优先用自己的会话 cwd，并做文件名白名单与物理路径校验。
+     */
+    function imageUrl(name, cwd) {
+      const text = String(name ?? '').trim()
+      if (text === '') return ''
+      const q = new URLSearchParams({ name: text })
+      if (typeof cwd === 'string' && cwd !== '') q.set('cwd', cwd)
+      return `/plan-tasks/images?${q.toString()}`
+    }
+
+    /**
      * 调 Host 半边：同源 POST + x-requested-with。
      * options.timeoutMs 是超时预算（默认 120s）：到点 abort 并抛 code='timeout' 的错误，
      * 让调用方一定收到一个结局，不会因为请求悬着而把遮罩/转圈永远留在界面上。

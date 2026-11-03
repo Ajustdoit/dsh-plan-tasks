@@ -65,6 +65,11 @@
       // 它原本是个**空壳功能** —— settings.json 里存了 autoConfirm，
       // 但没有任何业务代码读它来执行自动审核（approveBatch 只看 backupBeforeTrim）。
       // 所以删除是干净的：不留行为空洞，也不影响任何既有流程。
+      // id=UpcIC7-IMG：输入框里待提交的附件图片（已上传到宿主，存的是**文件名**）。
+      // 不放 base64：图片已经在宿主侧落盘，这里只留名字，界面按需用 URL 加载。
+      const [pendingImages, setPendingImages] = React.useState([])
+      // 上传中的数量，用来禁用发送键（避免「图还没传完就提交」导致附件丢失）。
+      const [uploadingCount, setUploadingCount] = React.useState(0)
       const [form, setForm] = React.useState({
         plan: typeof saved?.plan === 'string' ? saved.plan : '',
         mode: typeof saved?.mode === 'string' ? saved.mode : '',
@@ -246,6 +251,63 @@
           /* 隐私模式下写不进去就算了 */
         }
       }, [storeKey, form, openId, auto, deepMode, splitMode])
+
+      // id=UpcIC7-IMG：把一张粘贴进来的图片上传到宿主，拿回文件名。
+      //
+      // 为什么走独立的上传接口而不是随 append 一起传 base64：
+      //   · append 的 body 会变大 1/3（base64 膨胀），且图片本可以先落盘；
+      //   · 上传失败时能单独提示「这张图没传上去」，而不是整条任务失败。
+      //
+      // 传的是 data URL（`data:image/png;base64,…`）—— 宿主那边既能解析它，
+      // 也能校验魔数。返回值是 `Ab3xK9-1.png` 这种文件名。
+      const uploadImage = React.useCallback(
+        async (file) => {
+          const mime = String(file?.type ?? '')
+          if (!/^image\/(png|jpeg|webp|gif)$/.test(mime)) {
+            setNotice('只支持 PNG / JPG / WebP / GIF 图片')
+            return null
+          }
+          setUploadingCount((n) => n + 1)
+          try {
+            const dataUrl = await new Promise((resolve, reject) => {
+              const reader = new FileReader()
+              reader.onload = () => resolve(String(reader.result ?? ''))
+              reader.onerror = () => reject(new Error('读取图片失败'))
+              reader.readAsDataURL(file)
+            })
+            const res = await fetch('/plan-tasks/images/upload', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', 'x-requested-with': 'XMLHttpRequest' },
+              body: JSON.stringify({ sessionId, cwd, taskId: 'draft', data: dataUrl, mime }),
+            })
+            const body = await res.json()
+            if (body?.ok !== true) {
+              setNotice(`图片上传失败：${body?.error?.message ?? '未知原因'}`)
+              return null
+            }
+            return String(body.value?.name ?? '')
+          } catch (error) {
+            setNotice(`图片上传失败：${error instanceof Error ? error.message : String(error)}`)
+            return null
+          } finally {
+            setUploadingCount((n) => Math.max(0, n - 1))
+          }
+        },
+        [sessionId, cwd],
+      )
+
+      // 从剪贴板/拖拽里取出图片文件并逐张上传。不是图片就当没发生，交给浏览器默认行为。
+      const pasteImages = React.useCallback(
+        async (fileList) => {
+          const files = Array.from(fileList ?? []).filter((f) => /^image\//.test(String(f?.type ?? '')))
+          if (files.length === 0) return
+          for (const file of files) {
+            const name = await uploadImage(file)
+            if (name !== '') setPendingImages((prev) => (prev.includes(name) ? prev : [...prev, name]))
+          }
+        },
+        [uploadImage],
+      )
 
       const run = React.useCallback(
         async (fn) => {
@@ -458,6 +520,24 @@
       }, [modelLoading, sessionId, cwd])
 
       const items = state.data?.items ?? []
+
+      // —— 图片灯箱（id=UpcIC7-IMG）——
+      // 灯箱**不挂在面板里**渲染：面板带 container-type:size，会成为
+      // position:fixed 的包含块，浮层只能覆盖侧栏那一小块（详见 45-lightbox.js）。
+      // 所以这里只做两件事：登记（拿到 h 与 URL 函数）+ 接上 Esc。
+      React.useEffect(() => attachLightbox(imageUrl), [])
+      // Esc 关闭：挂在 document 上 —— 焦点可能在浮层的任何一个静态节点上。
+      // 同时订阅状态，只为了让这个 effect 在「开着」时存在、关掉后卸下监听。
+      const [lightboxOpen, setLightboxOpen] = React.useState(false)
+      React.useEffect(() => subscribeLightbox((s) => setLightboxOpen(s !== null)), [])
+      React.useEffect(() => {
+        if (!lightboxOpen) return undefined
+        const onKey = (e) => {
+          if (e.key === 'Escape') closeLightbox()
+        }
+        document.addEventListener('keydown', onKey)
+        return () => document.removeEventListener('keydown', onKey)
+      }, [lightboxOpen])
 
       // —— turn 结束上报（id=ImWOun 后续优化）——
       //
@@ -821,12 +901,18 @@
         const data = await run(() =>
           // mode 由宿主按 taskType 推（客户端没有模式下拉，form.mode 恒为空串）；
           // 显式传 taskType 就够了，这里保留 mode 字段是为了将来加真下拉时不必改协议。
-          call('append', { ...payload, plan: text, mode: form.mode, taskType: form.taskType }),
+          //
+          // id=UpcIC7-IMG：附件只传**文件名**（图片早就上传落盘了），
+          // 所以请求体仍然是几十字节，不会被 base64 撑大。
+          call('append', { ...payload, plan: text, mode: form.mode, taskType: form.taskType, img: pendingImages }),
         )
         if (data !== undefined) {
           // 提交后停留在当前视图：只清空输入框并就地给一条提示，
           // 不展开新计划、不滚动列表、不切换选中项（否则会“跳走”）。
           setForm({ plan: '', mode: form.mode, taskType: form.taskType, expanded: false })
+          // id=UpcIC7-IMG：提交成功后清空待发送图片。
+          // 只在成功后清 —— 失败时保留，用户可以直接重试，不用重新贴一遍。
+          setPendingImages([])
           // id=388：**不再自动展开待执行组**（题面：发送消息时不再自动展开）。
           //
           // 原来这里是 `setOpenGroup(draftMode ? 'draft' : 'todo')`，想让刚提交的
@@ -2183,6 +2269,9 @@
                           // 挑一条顶到最前面，等于绕过拆解给出的执行顺序，用户看着也乱。
                           canPin: groupKey === 'todo' && (item.decomposeKey ?? '') === '',
                           onPinTop: () => void pinTop(item.id),
+                          // id=UpcIC7-IMG：附件缩略图要拼图片 URL，需要项目根。
+                          // 只有 cwd，没有别的上下文 —— 图片由宿主按文件名提供。
+                          cwd,
                           // id=354：拆解批次头部的「整批通过」统一入口。
                           // 只传 id，遍历 children 与收尾都在 approveBatch 里做 ——
                           // 按钮本身保持哑组件，不自己算「这一批还剩几条」。
@@ -2450,11 +2539,69 @@
               h(
                 'div',
                 { className: 'plt-composer' },
+                // id=UpcIC7-IMG：输入框上方的附件缩略图区。
+                // 有图才渲染这一行 —— 没图时不留空槽，输入框位置不会因为贴一张图往下跳。
+                pendingImages.length > 0
+                  ? h(
+                      'div',
+                      { className: 'plt-attach' },
+                      pendingImages.map((name) =>
+                        h(
+                          'span',
+                          { key: name, className: 'plt-attach-item' },
+                          h('img', {
+                            className: 'plt-attach-thumb',
+                            src: imageUrl(name, cwd),
+                            alt: '待发送的图片',
+                            draggable: false,
+                            onClick: () => openLightbox(name, cwd),
+                          }),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'plt-attach-del',
+                              'aria-label': '移除这张图片',
+                              'data-tip': '移除这张图片',
+                              onClick: () => setPendingImages((prev) => prev.filter((x) => x !== name)),
+                            },
+                            '×',
+                          ),
+                        ),
+                      ),
+                      uploadingCount > 0
+                        ? h('span', { className: 'plt-attach-loading' }, '上传中…')
+                        : null,
+                    )
+                  : null,
                 h('textarea', {
                   className: 'plt-input',
-                  placeholder: '写下一条计划，按 Shift+Enter 追加（Ctrl/Cmd+Enter 也可以）…',
+                  placeholder: '写下一条计划，按 Shift+Enter 追加（Ctrl/Cmd+Enter 也可以）…支持直接粘贴图片',
                   value: form.plan,
                   onChange: (e) => setForm({ ...form, plan: e.target.value }),
+                  // id=UpcIC7-IMG：粘贴图片。
+                  // 只有剪贴板里真的有图片文件时才拦截 —— 普通文本粘贴必须继续走默认行为，
+                  // 否则用户连文本都贴不进来。截图粘贴走的是 items（files 里也可能是空的）。
+                  onPaste: (e) => {
+                    const items = e.clipboardData?.items
+                    const files = []
+                    if (items !== undefined && items !== null) {
+                      for (const it of items) {
+                        if (it.kind === 'file' && /^image\//.test(String(it.type ?? ''))) {
+                          const f = it.getAsFile()
+                          if (f !== null) files.push(f)
+                        }
+                      }
+                    }
+                    if (files.length === 0 && e.clipboardData?.files?.length > 0) {
+                      for (const f of e.clipboardData.files) {
+                        if (/^image\//.test(String(f?.type ?? ''))) files.push(f)
+                      }
+                    }
+                    if (files.length === 0) return
+                    e.preventDefault()
+                    void pasteImages(files)
+                  },
                   onKeyDown: (e) => {
                     // Shift+Enter 追加任务；Ctrl/Cmd+Enter 作为习惯动作也保留。
                     const submit = (e.shiftKey || e.metaKey || e.ctrlKey) && e.key === 'Enter'
@@ -2630,5 +2777,9 @@
               ),
             )
           : null,
+        // id=UpcIC7-IMG：灯箱**不在**这里渲染。
+        // 它的节点挂在 document.body 上（见 45-lightbox.js 的说明）：
+        // .plt-root 带 container-type:size，会让 position:fixed 相对面板而不是视口，
+        // 浮层就变成「侧栏里的一小块」。挂到 body 才真正覆盖整个窗口。
       )
     }
